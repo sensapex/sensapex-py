@@ -6,7 +6,7 @@ import time
 
 import numpy as np
 import pyqtgraph as pg
-from acq4.drivers.sensapex import UMP
+from sensapex import UMP
 from six.moves import map
 from six.moves import range
 

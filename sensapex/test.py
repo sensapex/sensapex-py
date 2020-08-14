@@ -7,8 +7,9 @@ import time
 from sensapex import SensapexDevice, UMP
 
 parser = argparse.ArgumentParser(
-    description="Test for sensapex devices; prints position and status updates continuously.")
-parser.add_argument('--group', type=int, default=0, help="Device group number")
+    description="Test for sensapex devices; prints position and status updates continuously."
+)
+parser.add_argument("--group", type=int, default=0, help="Device group number")
 args = parser.parse_args()
 
 um = UMP.get_ump(group=args.group)

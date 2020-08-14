@@ -6,33 +6,52 @@ import time
 
 import numpy as np
 import pyqtgraph as pg
+from acq4.drivers.sensapex import UMP
 from six.moves import map
 from six.moves import range
 
-from acq4.drivers.sensapex import UMP
-
 parser = argparse.ArgumentParser(
-    description="Test for sensapex devices; perform a series of random moves while rapidly polling the device position and state.")
-parser.add_argument('device', type=int, help="Device ID to test")
-parser.add_argument('--group', type=int, default=0, help="Device group number")
-parser.add_argument('--x', action='store_true', default=False, dest='x',
-                    help="True = Random X axis values. False = keep start position")
-parser.add_argument('--y', action='store_true', default=False, dest='y',
-                    help="True = Random Y axis values. False = keep start position")
-parser.add_argument('--z', action='store_true', default=False, dest='z',
-                    help="True = Random Z axis values. False = keep start position")
+    description="Test for sensapex devices; perform a series of random moves while rapidly polling the device position and state."
+)
+parser.add_argument("device", type=int, help="Device ID to test")
+parser.add_argument("--group", type=int, default=0, help="Device group number")
+parser.add_argument(
+    "--x", action="store_true", default=False, dest="x", help="True = Random X axis values. False = keep start position"
+)
+parser.add_argument(
+    "--y", action="store_true", default=False, dest="y", help="True = Random Y axis values. False = keep start position"
+)
+parser.add_argument(
+    "--z", action="store_true", default=False, dest="z", help="True = Random Z axis values. False = keep start position"
+)
 
-parser.add_argument('--speed', type=int, default=1000, help="Movement speed in um/sec")
-parser.add_argument('--distance', type=int, default=10,
-                    help="Max distance to travel in um (relative to current position)")
-parser.add_argument('--iter', type=int, default=10, help="Number of positions to test")
-parser.add_argument('--acceleration', type=int, default=0, help="Max speed acceleration")
-parser.add_argument('--high-res', action='store_true', default=False, dest='high_res',
-                    help="Use high-resolution time sampling rather than poller's schedule")
-parser.add_argument('--start-pos', type=str, default=None, dest='start_pos',
-                    help="x,y,z starting position (by default, the current position is used)")
-parser.add_argument('--test-pos', type=str, default=None, dest='test_pos',
-                    help="x,y,z position to test (by default, random steps from the starting position are used)")
+parser.add_argument("--speed", type=int, default=1000, help="Movement speed in um/sec")
+parser.add_argument(
+    "--distance", type=int, default=10, help="Max distance to travel in um (relative to current position)"
+)
+parser.add_argument("--iter", type=int, default=10, help="Number of positions to test")
+parser.add_argument("--acceleration", type=int, default=0, help="Max speed acceleration")
+parser.add_argument(
+    "--high-res",
+    action="store_true",
+    default=False,
+    dest="high_res",
+    help="Use high-resolution time sampling rather than poller's schedule",
+)
+parser.add_argument(
+    "--start-pos",
+    type=str,
+    default=None,
+    dest="start_pos",
+    help="x,y,z starting position (by default, the current position is used)",
+)
+parser.add_argument(
+    "--test-pos",
+    type=str,
+    default=None,
+    dest="test_pos",
+    help="x,y,z position to test (by default, random steps from the starting position are used)",
+)
 args = parser.parse_args()
 
 ump = UMP.get_ump(group=args.group)
@@ -49,9 +68,9 @@ app = pg.mkQApp()
 win = pg.GraphicsLayoutWidget()
 win.show()
 plots = [
-    win.addPlot(labels={'left': ('x position', 'm'), 'bottom': ('time', 's')}),
-    win.addPlot(labels={'left': ('y position', 'm'), 'bottom': ('time', 's')}),
-    win.addPlot(labels={'left': ('z position', 'm'), 'bottom': ('time', 's')}),
+    win.addPlot(labels={"left": ("x position", "m"), "bottom": ("time", "s")}),
+    win.addPlot(labels={"left": ("y position", "m"), "bottom": ("time", "s")}),
+    win.addPlot(labels={"left": ("z position", "m"), "bottom": ("time", "s")}),
 ]
 plots[1].setYLink(plots[0])
 plots[2].setYLink(plots[0])
@@ -60,9 +79,9 @@ plots[2].setXLink(plots[0])
 
 win.nextRow()
 errplots = [
-    win.addPlot(labels={'left': ('x error', 'm'), 'bottom': ('time', 's')}),
-    win.addPlot(labels={'left': ('y error', 'm'), 'bottom': ('time', 's')}),
-    win.addPlot(labels={'left': ('z error', 'm'), 'bottom': ('time', 's')}),
+    win.addPlot(labels={"left": ("x error", "m"), "bottom": ("time", "s")}),
+    win.addPlot(labels={"left": ("y error", "m"), "bottom": ("time", "s")}),
+    win.addPlot(labels={"left": ("z error", "m"), "bottom": ("time", "s")}),
 ]
 errplots[1].setYLink(errplots[0])
 errplots[2].setYLink(errplots[0])
@@ -103,19 +122,23 @@ def update(update_error=False):
 def update_plots():
     for i in range(3):
         plots[i].clear()
-        plots[i].addItem(pg.PlotCurveItem(times, bus[:-1], stepMode=True, pen=None, brush=(0, 255, 0, 40), fillLevel=0),
-                         ignoreBounds=True)
-        plots[i].addItem(pg.PlotCurveItem(times, mov[:-1], stepMode=True, pen=None, brush=(255, 0, 0, 40), fillLevel=0),
-                         ignoreBounds=True)
-        plots[i].plot(times, tgt[i], pen='r')
-        plots[i].plot(times, pos[i], symbol='o', symbolSize=5)
-        errplots[i].plot(times, err[i], clear=True, connect='finite')
+        plots[i].addItem(
+            pg.PlotCurveItem(times, bus[:-1], stepMode=True, pen=None, brush=(0, 255, 0, 40), fillLevel=0),
+            ignoreBounds=True,
+        )
+        plots[i].addItem(
+            pg.PlotCurveItem(times, mov[:-1], stepMode=True, pen=None, brush=(255, 0, 0, 40), fillLevel=0),
+            ignoreBounds=True,
+        )
+        plots[i].plot(times, tgt[i], pen="r")
+        plots[i].plot(times, pos[i], symbol="o", symbolSize=5)
+        errplots[i].plot(times, err[i], clear=True, connect="finite")
 
 
 if args.start_pos is None:
     start_pos = dev.get_pos()
 else:
-    start_pos = np.array(list(map(float, args.start_pos.split(','))))
+    start_pos = np.array(list(map(float, args.start_pos.split(","))))
 
 print(start_pos)
 diffs = []
@@ -149,7 +172,7 @@ if args.test_pos is None:
     print(targets)
 else:
     # just move back and forth between start and test position
-    test_pos = np.array(list(map(float, args.test_pos.split(','))))
+    test_pos = np.array(list(map(float, args.test_pos.split(","))))
     targets = np.zeros((args.iter, 3))
     targets[::2] = start_pos[None, :]
     targets[1::2] = test_pos[None, :]

@@ -7,9 +7,23 @@ import platform
 import sys
 import threading
 import time
-from ctypes import (c_int, c_uint, c_ulong, c_short, c_ushort,
-                    c_byte, c_void_p, c_char, c_char_p, c_longlong,
-                    byref, POINTER, pointer, Structure, c_float)
+from ctypes import (
+    c_int,
+    c_uint,
+    c_ulong,
+    c_short,
+    c_ushort,
+    c_byte,
+    c_void_p,
+    c_char,
+    c_char_p,
+    c_longlong,
+    byref,
+    POINTER,
+    pointer,
+    Structure,
+    c_float,
+)
 from timeit import default_timer
 
 import numpy as np
@@ -18,7 +32,7 @@ from six.moves import range
 from six.moves import zip
 
 SOCKET = c_int
-if sys.platform == 'win32' and platform.architecture()[0] == '64bit':
+if sys.platform == "win32" and platform.architecture()[0] == "64bit":
     SOCKET = c_longlong
 
 LIBUM_MAX_MANIPULATORS = 254
@@ -27,20 +41,20 @@ LIBUM_DEF_TIMEOUT = 20
 LIBUM_DEF_BCAST_ADDRESS = b"169.254.255.255"
 LIBUM_DEF_GROUP = 0
 LIBUM_MAX_MESSAGE_SIZE = 1502
-LIBUM_ARG_UNDEF = float('nan')
+LIBUM_ARG_UNDEF = float("nan")
 X_AXIS = 1
 Y_AXIS = 2
 Z_AXIS = 4
 D_AXIS = 8
 
 # error codes
-LIBUM_NO_ERROR     =  0,  # No error
-LIBUM_OS_ERROR     = -1,  # Operating System level error
-LIBUM_NOT_OPEN     = -2,  # Communication socket not open
-LIBUM_TIMEOUT      = -3,  # Timeout occured
-LIBUM_INVALID_ARG  = -4,  # Illegal command argument
-LIBUM_INVALID_DEV  = -5,  # Illegal Device Id
-LIBUM_INVALID_RESP = -6,  # Illegal response received
+LIBUM_NO_ERROR     = (0,)   # No error
+LIBUM_OS_ERROR     = (-1,)  # Operating System level error
+LIBUM_NOT_OPEN     = (-2,)  # Communication socket not open
+LIBUM_TIMEOUT      = (-3,)  # Timeout occured
+LIBUM_INVALID_ARG  = (-4,)  # Illegal command argument
+LIBUM_INVALID_DEV  = (-5,)  # Illegal Device Id
+LIBUM_INVALID_RESP = (-6,)  # Illegal response received
 UM_LIB_PATH = None
 
 
@@ -53,8 +67,8 @@ class sockaddr_in(Structure):
     _fields_ = [
         ("family", c_short),
         ("port", c_ushort),
-        ("in_addr", c_byte*4),
-        ("zero", c_byte*8),
+        ("in_addr", c_byte * 4),
+        ("zero", c_byte * 8),
     ]
 
 
@@ -137,6 +151,8 @@ class UMError(Exception):
 
 
 _timer_offset = time.time() - default_timer()
+
+
 def timer():
     global _timer_offset
     return _timer_offset + default_timer()
@@ -147,6 +163,7 @@ class UMP(object):
     
     All calls except get_ump are thread-safe.
     """
+
     _um_state = None
     _single = None
     _lib = None
@@ -161,26 +178,26 @@ class UMP(object):
     @classmethod
     def load_lib(cls):
         path = os.path.abspath(os.path.dirname(__file__))
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             if UM_LIB_PATH is not None:
-                return ctypes.windll.LoadLibrary(os.path.join(UM_LIB_PATH, 'umsdk'))
+                return ctypes.windll.LoadLibrary(os.path.join(UM_LIB_PATH, "umsdk"))
 
             try:
                 return ctypes.windll.umsdk
             except OSError:
                 pass
 
-            return ctypes.windll.LoadLibrary(os.path.join(path, 'umsdk'))
+            return ctypes.windll.LoadLibrary(os.path.join(path, "umsdk"))
         else:
             if UM_LIB_PATH is not None:
-                return ctypes.windll.LoadLibrary(os.path.join(UM_LIB_PATH, 'libump.so.1.0.0'))
+                return ctypes.windll.LoadLibrary(os.path.join(UM_LIB_PATH, "libump.so.1.0.0"))
 
-            return ctypes.cdll.LoadLibrary(os.path.join(path, 'libump.so.1.0.0'))
+            return ctypes.cdll.LoadLibrary(os.path.join(path, "libump.so.1.0.0"))
 
     @classmethod
     def get_um_state_class(cls):
         if cls._um_state is None:
-            version = cls.get_lib().um_get_version().decode('ascii')
+            version = cls.get_lib().um_get_version().decode("ascii")
             if version >= "v0.600":
                 cls._um_state = um_state_v0_600
             else:
@@ -195,7 +212,7 @@ class UMP(object):
         if cls._single is None:
             cls._single = UMP(address=address, group=group, start_poller=start_poller)
         return cls._single
-    
+
     def __init__(self, address=None, group=None, start_poller=True):
         self.lock = threading.RLock()
         if self._single is not None:
@@ -212,16 +229,19 @@ class UMP(object):
         self.max_move_retry = 3
 
         self.max_acceleration = {}
-        
+
         self.lib = self.get_lib()
         self.lib.um_errorstr.restype = c_char_p
 
         min_version = (0, 918)
-        min_version_str = 'v%d.%d' % min_version
+        min_version_str = "v%d.%d" % min_version
         version_str = self.sdk_version()
-        version = tuple(map(int, version_str.lstrip(b'v').split(b'.')))
+        version = tuple(map(int, version_str.lstrip(b"v").split(b".")))
 
-        assert version >= min_version, "SDK version %s or later required (your version is %s)" % (min_version_str, version_str)
+        assert version >= min_version, "SDK version %s or later required (your version is %s)" % (
+            min_version_str,
+            version_str,
+        )
 
         self.h = None
         self.open(address=address, group=group)
@@ -231,7 +251,7 @@ class UMP(object):
         # last time each device was seen moving
         self._last_busy_time = {}
 
-        self._um_has_axis_count = hasattr(self.lib, 'um_get_axis_count')
+        self._um_has_axis_count = hasattr(self.lib, "um_get_axis_count")
         self._axis_counts = {}
 
         self.devices = {}
@@ -253,14 +273,14 @@ class UMP(object):
         """
         self.lib.um_get_version.restype = ctypes.c_char_p
         return self.lib.um_get_version()
-        
+
     def list_devices(self, max_id=50):
         """Return a list of all connected device IDs.
         """
-        devarray = (c_int*max_id)()
-        r = self.call('um_get_device_list', byref(devarray), c_int(max_id))
+        devarray = (c_int * max_id)()
+        r = self.call("um_get_device_list", byref(devarray), c_int(max_id))
         devs = [devarray[i] for i in range(r)]
-        
+
         return devs
 
     def axis_count(self, dev):
@@ -268,7 +288,7 @@ class UMP(object):
             return 4
         c = self._axis_counts.get(dev, None)
         if c is None:
-            c = self.call('um_get_axis_count', dev)
+            c = self.call("um_get_axis_count", dev)
             self._axis_counts[dev] = c
         return c
 
@@ -307,7 +327,7 @@ class UMP(object):
             raise RuntimeError("Error connecting to UM:", self.lib.um_errorstr(ptr))
         self.h = pointer(self.get_um_state_class().from_address(ptr))
         atexit.register(self.close)
-        
+
     def close(self):
         """Close the UM device.
         """
@@ -328,11 +348,11 @@ class UMP(object):
             timeout = self._timeout
         xyzwe = c_float(), c_float(), c_float(), c_float(), c_int()
         timeout = c_int(timeout)
-       
-        r = self.call('um_get_positions', c_int(dev), timeout, *[byref(x) for x in xyzwe]) 
+
+        r = self.call("um_get_positions", c_int(dev), timeout, *[byref(x) for x in xyzwe])
 
         n_axes = self.axis_count(dev)
-        #if dev == 9:
+        # if dev == 9:
         #    return [-x.value for x in xyzwe[:n_axes]]
         return [x.value for x in xyzwe[:n_axes]]
 
@@ -360,35 +380,42 @@ class UMP(object):
         move_id : int
             Unique ID that can be used to retrieve the status of this move at a later time.
         """
-        kwargs = {'dev': dev, 'pos': pos, 'speed': speed, 'simultaneous': simultaneous, 'linear': linear, 'max_acceleration': max_acceleration}
+        kwargs = {
+            "dev": dev,
+            "pos": pos,
+            "speed": speed,
+            "simultaneous": simultaneous,
+            "linear": linear,
+            "max_acceleration": max_acceleration,
+        }
         pos = [float(x) for x in pos]
-        pos4 = pos + [float('nan')] * (4-len(pos))  # extend to 4 values
+        pos4 = pos + [float("nan")] * (4 - len(pos))  # extend to 4 values
 
         mode = int(bool(simultaneous))  # all axes move simultaneously
 
         current_pos = self.get_pos(dev)
-        diff = [float(p-c) for p,c in zip(pos4, current_pos) if p is not None]
+        diff = [float(p - c) for p, c in zip(pos4, current_pos) if p is not None]
         dist = max(1, np.linalg.norm(diff))
         original_speed = speed
         if linear:
             speed = [max(1, speed * abs(d / dist)) for d in diff]
-            speed = speed + [0] * (4-len(speed))
+            speed = speed + [0] * (4 - len(speed))
         else:
             speed = [max(1, speed)] * 4  # speed < 1 crashes the uMp
 
-        if max_acceleration==0 or max_acceleration == None:
+        if max_acceleration == 0 or max_acceleration == None:
             if self.max_acceleration[dev] != None:
                 max_acceleration = self.max_acceleration[dev]
             else:
                 max_acceleration = 0
 
         args = [c_int(dev)] + [c_float(x) for x in pos4] + [c_int(int(x)) for x in speed + [mode] + [max_acceleration]]
-        duration = max(np.array(diff) / speed[:len(diff)])
+        duration = max(np.array(diff) / speed[: len(diff)])
 
         with self.lock:
             last_move = self._last_move.pop(dev, None)
             if last_move is not None:
-                self.call('um_stop', c_int(dev))
+                self.call("um_stop", c_int(dev))
                 last_move._interrupt("started another move before the previous finished")
 
             if _request is None:
@@ -399,7 +426,7 @@ class UMP(object):
 
             self._last_move[dev] = next_move
 
-            self.call('um_goto_position_ext', *args)
+            self.call("um_goto_position_ext", *args)
 
         return next_move
 
@@ -411,7 +438,7 @@ class UMP(object):
         """
         # idle/complete=0; moving>0; failed<0
         try:
-            return self.call('um_get_drive_status', c_int(dev)) > 0
+            return self.call("um_get_drive_status", c_int(dev)) > 0
         except UMError as err:
             if err.errno in (LIBUM_NOT_OPEN, LIBUM_INVALID_DEV):
                 raise
@@ -422,40 +449,40 @@ class UMP(object):
         """Stop the specified manipulator.
         """
         with self.lock:
-            self.call('um_stop', c_int(dev))
+            self.call("um_stop", c_int(dev))
             move = self._last_move.pop(dev, None)
             if move is not None:
-                move._interrupt('stop requested before move finished')
+                move._interrupt("stop requested before move finished")
 
     def set_pressure(self, dev, channel, value):
-        return self.call('umc_set_pressure_setting', dev, int(channel), c_float(value))
+        return self.call("umc_set_pressure_setting", dev, int(channel), c_float(value))
 
     def get_pressure(self, dev, channel):
         p = c_float()
-        self.call('umc_get_pressure_setting', dev, int(channel), byref(p))
+        self.call("umc_get_pressure_setting", dev, int(channel), byref(p))
         return p.value
 
     def set_valve(self, dev, channel, value):
-        return self.call('umc_set_valve', dev, int(channel), int(value))
+        return self.call("umc_set_valve", dev, int(channel), int(value))
 
     def get_valve(self, dev, channel):
-        return self.call('umc_get_valve', dev, int(channel))
+        return self.call("umc_get_valve", dev, int(channel))
 
     def set_custom_slow_speed(self, dev, enabled):
         feature_custom_slow_speed = 32
-        return self.call('um_set_ext_feature', c_int(dev), c_int(feature_custom_slow_speed), c_int(enabled))
-    
-    def get_custom_slow_speed(self,dev):
+        return self.call("um_set_ext_feature", c_int(dev), c_int(feature_custom_slow_speed), c_int(enabled))
+
+    def get_custom_slow_speed(self, dev):
         feature_custom_slow_speed = 32
-        return self.call('um_get_ext_feature', c_int(dev), c_int(feature_custom_slow_speed))
+        return self.call("um_get_ext_feature", c_int(dev), c_int(feature_custom_slow_speed))
 
     def get_um_param(self, dev, param):
         value = c_int()
-        self.call('um_get_param',c_int(dev),c_int(param), *[byref(value)])
+        self.call("um_get_param", c_int(dev), c_int(param), *[byref(value)])
         return value
-        
-    def set_um_param(self,dev,param, value):
-        return self.call('um_set_param',c_int(dev),c_int(param), value)
+
+    def set_um_param(self, dev, param, value):
+        return self.call("um_set_param", c_int(dev), c_int(param), value)
 
     def calibrate_zero_position(self, dev):
         self.call("um_init_zero", X_AXIS | Y_AXIS | Z_AXIS | D_AXIS)
@@ -465,27 +492,27 @@ class UMP(object):
 
     def get_soft_start_state(self, dev):
         feature_soft_start = 33
-        return self.call('um_get_ext_feature', c_int(dev), c_int(feature_soft_start))
-    
+        return self.call("um_get_ext_feature", c_int(dev), c_int(feature_soft_start))
+
     def set_soft_start_state(self, dev, enabled):
         feature_soft_start = 33
-        return self.call('um_set_ext_feature', c_int(dev), c_int(feature_soft_start), c_int(enabled))
+        return self.call("um_set_ext_feature", c_int(dev), c_int(feature_soft_start), c_int(enabled))
 
     def get_soft_start_value(self, dev):
-        return self.get_um_param(dev,15)
+        return self.get_um_param(dev, 15)
 
     def set_soft_start_value(self, dev, value):
-        return self.set_um_param(dev,15, value)
+        return self.set_um_param(dev, 15, value)
 
     def recv_all(self):
         """Receive all queued position/status update packets and update any pending moves.
         """
-        self.call('um_receive', 0)
+        self.call("um_receive", 0)
         self._update_moves()
 
     def _update_moves(self):
         with self.lock:
-            for dev,move in list(self._last_move.items()):
+            for dev, move in list(self._last_move.items()):
                 if not self.is_busy(dev):
                     move_req = self._last_move.pop(dev)
 
@@ -493,7 +520,7 @@ class UMP(object):
                     target = np.array(move_req.target_pos).astype(float)
                     err = np.abs(pos - target)
                     mask = np.isfinite(err)
-                    reached_target = np.all(err[mask] < self.retry_threshold[:len(mask)][mask])
+                    reached_target = np.all(err[mask] < self.retry_threshold[: len(mask)][mask])
                     if reached_target or move_req.retry_count >= self.max_move_retry:
                         move._finish(pos)
                     else:
@@ -505,6 +532,7 @@ class UMP(object):
 class MoveRequest(object):
     """Simple class for tracking the status of requested moves.
     """
+
     def __init__(self, dev, start_pos, target_pos, speed, duration, kwargs):
         self.dev = dev
         self.start_time = timer()
@@ -542,6 +570,7 @@ class SensapexDevice(object):
         pos[0] += 10000  # add 10 um to x axis 
         dev.goto_pos(pos, speed=10)
     """
+
     def __init__(self, devid, callback=None, n_axes=None, max_acceleration=0):
         self.devid = int(devid)
         self.ump = UMP.get_ump()
@@ -570,16 +599,18 @@ class SensapexDevice(object):
 
     def add_callback(self, callback):
         self.callbacks.append(callback)
-        
+
     def get_pos(self, timeout=None):
         return self.ump.get_pos(self.devid, timeout=timeout)
-    
+
     def goto_pos(self, pos, speed, simultaneous=True, linear=False, max_acceleration=0):
-        return self.ump.goto_pos(self.devid, pos, speed, simultaneous=simultaneous, linear=False, max_acceleration=max_acceleration)
-    
+        return self.ump.goto_pos(
+            self.devid, pos, speed, simultaneous=simultaneous, linear=False, max_acceleration=max_acceleration
+        )
+
     def is_busy(self):
         return self.ump.is_busy(self.devid)
-    
+
     def stop(self):
         return self.ump.stop(self.devid)
 
@@ -606,37 +637,37 @@ class SensapexDevice(object):
         return self.ump.get_pressure(self.devid, int(channel))
 
     def set_valve(self, channel, value):
-        return self.ump.set_valve(self.devid, int(channel), int (value))
+        return self.ump.set_valve(self.devid, int(channel), int(value))
 
     def get_valve(self, channel):
-        return self.ump.get_valve(self.devid, int(channel)) 
+        return self.ump.get_valve(self.devid, int(channel))
 
     def set_lens_position(self, pos):
-        return self.ump.call('ums_set_lens_position', c_int(self.devid), c_int(pos))
+        return self.ump.call("ums_set_lens_position", c_int(self.devid), c_int(pos))
 
     def get_lens_position(self):
-        return self.ump.call('ums_get_lens_position', c_int(self.devid))
+        return self.ump.call("ums_get_lens_position", c_int(self.devid))
 
     def set_custom_slow_speed(self, enabled):
         return self.ump.set_custom_slow_speed(self.devid, enabled)
 
     def calibrate_zero_position(self):
         self.ump.calibrate_zero_position(self.devid)
-    
+
     def calibrate_load(self):
         self.ump.calibrate_load(self.devid)
 
     def get_soft_start_state(self):
         return self.ump.get_soft_start_state(self.devid)
-    
+
     def set_soft_start_state(self, enabled):
-        return self.ump.set_soft_start_state(self.devid,enabled)
+        return self.ump.set_soft_start_state(self.devid, enabled)
 
     def get_soft_start_value(self):
         return self.ump.get_soft_start_value(self.devid).value
 
     def set_soft_start_value(self, value):
-        return self.ump.set_soft_start_value(self.devid,value)
+        return self.ump.set_soft_start_value(self.devid, value)
 
 
 class PollThread(threading.Thread):
@@ -648,6 +679,7 @@ class PollThread(threading.Thread):
     An optional callback function is called periodically with a list of
     device IDs from which position updates have been received.
     """
+
     def __init__(self, ump, callback=None, interval=0.03):
         self.ump = ump
         self.callbacks = {}
@@ -683,7 +715,7 @@ class PollThread(threading.Thread):
 
                 # read all updates waiting in queue
                 ump.recv_all()
-                
+
                 # check for position changes and invoke callbacks
                 with self.lock:
                     callbacks = self.callbacks.copy()
@@ -700,7 +732,7 @@ class PollThread(threading.Thread):
                 time.sleep(self.interval)
 
             except Exception:
-                print('Error in sensapex poll thread:')
+                print("Error in sensapex poll thread:")
                 sys.excepthook(*sys.exc_info())
                 time.sleep(1)
             except:

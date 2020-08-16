@@ -1,7 +1,6 @@
-from setuptools import setup
-
-# read the contents of your README file
 from os import path
+
+from setuptools import setup, find_packages
 
 this_directory = path.abspath(path.dirname(__file__))
 with open(path.join(this_directory, "README.md"), encoding="utf-8") as f:
@@ -26,5 +25,8 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     name="sensapex-sdk",
+    packages=find_packages(),
+    python_requires=">=3.7",
     url="https://github.com/sensapex/sensapex-sdk",
+    version="0.920.0",  # in lock step with umsdk version
 )

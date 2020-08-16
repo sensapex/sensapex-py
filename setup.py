@@ -20,7 +20,7 @@ setup(
         "Topic :: Scientific/Engineering",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
-    description="Wrapper for the Sensapex SDK",
+    description="Python wrapper for the Sensapex SDK",
     license="MIT",
     long_description=long_description,
     long_description_content_type="text/markdown",

@@ -4,7 +4,7 @@ This python library wraps the C SDK provided by Sensapex's umsdk. It provide gen
 
 ### Installation
 
-`pip install sensapex-sdk`
+`pip install sensapex-py`
 
 Download [the latest umsdk library](http://dist.sensapex.com/misc/um-sdk/rc/).
 

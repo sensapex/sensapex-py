@@ -24,9 +24,9 @@ setup(
     license="MIT",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    name="sensapex-sdk",
+    name="sensapex-py",
     packages=find_packages(),
     python_requires=">=3.7",
-    url="https://github.com/sensapex/sensapex-sdk",
+    url="https://github.com/sensapex/sensapex-py",
     version="0.920.0",  # in lock step with umsdk version
 )

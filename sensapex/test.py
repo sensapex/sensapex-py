@@ -29,7 +29,7 @@ def print_pos(timeout=None):
         except Exception as err:
             pos = str(err.args[0])
         pos = pos + " " * (30 - len(pos))
-        line += "%d:  %s" % (i, pos)
+        line += f"{i:d}:  {pos}"
     print(line)
 
 
@@ -38,9 +38,9 @@ while True:
     t1 = time.time()
     dt = t1 - t
     t = t1
-    line = "%3f" % dt
+    line = f"{dt:3f}"
     for id in sorted(list(devs.keys())):
-        line += "   %d: %s busy: %s" % (id, devs[id].get_pos(timeout=0), devs[id].is_busy())
+        line += f"   {id:d}: {devs[id].get_pos(timeout=0)} busy: {devs[id].is_busy()}"
     line += "                           \r"
     print(line, end=" ")
     sys.stdout.flush()

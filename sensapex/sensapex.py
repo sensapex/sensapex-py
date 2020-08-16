@@ -51,16 +51,10 @@ D_AXIS = 8
 LIBUM_NO_ERROR     = (0,)   # No error
 LIBUM_OS_ERROR     = (-1,)  # Operating System level error
 LIBUM_NOT_OPEN     = (-2,)  # Communication socket not open
-LIBUM_TIMEOUT      = (-3,)  # Timeout occured
+LIBUM_TIMEOUT      = (-3,)  # Timeout occurred
 LIBUM_INVALID_ARG  = (-4,)  # Illegal command argument
 LIBUM_INVALID_DEV  = (-5,)  # Illegal Device Id
 LIBUM_INVALID_RESP = (-6,)  # Illegal response received
-UM_LIB_PATH = None
-
-
-def setLibraryPath(path):
-    global UM_LIB_PATH
-    UM_LIB_PATH = path
 
 
 class sockaddr_in(Structure):
@@ -143,6 +137,37 @@ class um_state_pre_v0_600(Structure):
     ]
 
 
+class MoveRequest(object):
+    """Simple class for tracking the status of requested moves.
+    """
+
+    def __init__(self, dev, start_pos, target_pos, speed, duration, kwargs):
+        self.dev = dev
+        self.start_time = timer()
+        self.estimated_duration = duration
+        self.start_pos = start_pos
+        self.target_pos = target_pos
+        self.speed = speed
+        self.kwargs = kwargs
+        self.finished = False
+        self.interrupted = False
+        self.interrupt_reason = None
+        self.last_pos = None
+        self.finished_event = threading.Event()
+        self.retry_count = 0
+
+    def interrupt(self, reason):
+        self.interrupt_reason = reason
+        self.interrupted = True
+        self.finished = True
+        self.finished_event.set()
+
+    def finish(self, pos):
+        self.last_pos = pos
+        self.finished = True
+        self.finished_event.set()
+
+
 class UMError(Exception):
     def __init__(self, msg, errno, oserrno):
         Exception.__init__(self, msg)
@@ -164,9 +189,14 @@ class UMP(object):
     All calls except get_ump are thread-safe.
     """
 
-    _um_state = None
-    _single = None
     _lib = None
+    _lib_path = None
+    _single = None
+    _um_state = None
+
+    @classmethod
+    def set_library_path(cls, path):
+        cls._lib_path = path
 
     @classmethod
     def get_lib(cls):
@@ -179,8 +209,8 @@ class UMP(object):
     def load_lib(cls):
         path = os.path.abspath(os.path.dirname(__file__))
         if sys.platform == "win32":
-            if UM_LIB_PATH is not None:
-                return ctypes.windll.LoadLibrary(os.path.join(UM_LIB_PATH, "umsdk"))
+            if cls._lib_path is not None:
+                return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, "umsdk"))
 
             try:
                 return ctypes.windll.umsdk
@@ -189,8 +219,8 @@ class UMP(object):
 
             return ctypes.windll.LoadLibrary(os.path.join(path, "umsdk"))
         else:
-            if UM_LIB_PATH is not None:
-                return ctypes.windll.LoadLibrary(os.path.join(UM_LIB_PATH, "libump.so.1.0.0"))
+            if cls._lib_path is not None:
+                return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, "libump.so.1.0.0"))
 
             return ctypes.cdll.LoadLibrary(os.path.join(path, "libump.so.1.0.0"))
 
@@ -261,6 +291,12 @@ class UMP(object):
             self.poller.start()
 
     def get_device(self, dev_id):
+        """
+
+        Returns
+        -------
+        SensapexDevice
+        """
         if dev_id not in self.devices:
             all_devs = self.list_devices()
             if dev_id not in all_devs:
@@ -349,7 +385,7 @@ class UMP(object):
         xyzwe = c_float(), c_float(), c_float(), c_float(), c_int()
         timeout = c_int(timeout)
 
-        r = self.call("um_get_positions", c_int(dev), timeout, *[byref(x) for x in xyzwe])
+        self.call("um_get_positions", c_int(dev), timeout, *[byref(x) for x in xyzwe])
 
         n_axes = self.axis_count(dev)
         # if dev == 9:
@@ -403,8 +439,8 @@ class UMP(object):
         else:
             speed = [max(1, speed)] * 4  # speed < 1 crashes the uMp
 
-        if max_acceleration == 0 or max_acceleration == None:
-            if self.max_acceleration[dev] != None:
+        if max_acceleration == 0 or max_acceleration is None:
+            if self.max_acceleration[dev] is not None:
                 max_acceleration = self.max_acceleration[dev]
             else:
                 max_acceleration = 0
@@ -416,7 +452,7 @@ class UMP(object):
             last_move = self._last_move.pop(dev, None)
             if last_move is not None:
                 self.call("um_stop", c_int(dev))
-                last_move._interrupt("started another move before the previous finished")
+                last_move.interrupt("started another move before the previous finished")
 
             if _request is None:
                 next_move = MoveRequest(dev, current_pos, pos, original_speed, duration, kwargs)
@@ -452,7 +488,7 @@ class UMP(object):
             self.call("um_stop", c_int(dev))
             move = self._last_move.pop(dev, None)
             if move is not None:
-                move._interrupt("stop requested before move finished")
+                move.interrupt("stop requested before move finished")
 
     def set_pressure(self, dev, channel, value):
         return self.call("umc_set_pressure_setting", dev, int(channel), c_float(value))
@@ -522,46 +558,15 @@ class UMP(object):
                     mask = np.isfinite(err)
                     reached_target = np.all(err[mask] < self.retry_threshold[: len(mask)][mask])
                     if reached_target or move_req.retry_count >= self.max_move_retry:
-                        move._finish(pos)
+                        move.finish(pos)
                     else:
                         # retry move if we missed the target
                         move_req.retry_count += 1
                         self.goto_pos(_request=move_req, **move_req.kwargs)
 
 
-class MoveRequest(object):
-    """Simple class for tracking the status of requested moves.
-    """
-
-    def __init__(self, dev, start_pos, target_pos, speed, duration, kwargs):
-        self.dev = dev
-        self.start_time = timer()
-        self.estimated_duration = duration
-        self.start_pos = start_pos
-        self.target_pos = target_pos
-        self.speed = speed
-        self.kwargs = kwargs
-        self.finished = False
-        self.interrupted = False
-        self.interrupt_reason = None
-        self.last_pos = None
-        self.finished_event = threading.Event()
-        self.retry_count = 0
-
-    def _interrupt(self, reason):
-        self.interrupt_reason = reason
-        self.interrupted = True
-        self.finished = True
-        self.finished_event.set()
-
-    def _finish(self, pos):
-        self.last_pos = pos
-        self.finished = True
-        self.finished_event.set()
-
-
 class SensapexDevice(object):
-    """UM wrapper for accessing a single sensapex manipulator.
+    """UM wrapper for accessing a single sensapex device.
 
     Example:
     
@@ -605,7 +610,7 @@ class SensapexDevice(object):
 
     def goto_pos(self, pos, speed, simultaneous=True, linear=False, max_acceleration=0):
         return self.ump.goto_pos(
-            self.devid, pos, speed, simultaneous=simultaneous, linear=False, max_acceleration=max_acceleration
+            self.devid, pos, speed, simultaneous=simultaneous, linear=linear, max_acceleration=max_acceleration
         )
 
     def is_busy(self):

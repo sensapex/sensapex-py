@@ -1,1 +1,1 @@
-from .sensapex import UMP, SensapexDevice, UMError, setLibraryPath
+from .sensapex import UMP, SensapexDevice, UMError

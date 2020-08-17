@@ -26,3 +26,16 @@ manipulator.goto_pos((-2500.0412, 6810.0003, 15830.1419), speed=2)
 pressure = ump.get_device(30)
 pressure.set_pressure(1, 2.3e-4)
 ```
+
+Also included are some simple sanity checks. The following will report on all devices present:
+
+```bash
+python -m sensapex.test
+```
+
+Or for a more involved test of your hardware as it moves around randomly, install [pyqtgraph](https://pyqtgraph.org) in your environment and use:
+
+```bash
+STAGE_DEVID=1
+python -m sensapex.accuracy_test $STAGE_DEVID
+```

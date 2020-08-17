@@ -13,7 +13,7 @@ Download [the latest umsdk library](http://dist.sensapex.com/misc/um-sdk/rc/).
 ```python
 from sensapex import UMP
 
-UMP.set_library_path("/path/which/contains/umsdk/for/your/platform/")
+UMP.set_library_path("/path/which/contains/umsdk/binary/for/your/platform/")
 ump = UMP.get_ump()
 ump.list_devices()
 
@@ -33,7 +33,7 @@ Also included are some simple sanity checks. The following will report on all de
 python -m sensapex.test
 ```
 
-Or for a more involved test of your hardware as it moves around randomly, install [pyqtgraph](https://pyqtgraph.org) in your environment and use:
+Or for a more involved test of your hardware as it moves around randomly, install [pyqtgraph](https://pyqtgraph.org) in your environment and use e.g.:
 
 ```bash
 STAGE_DEVID=1

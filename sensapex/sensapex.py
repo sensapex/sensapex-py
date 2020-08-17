@@ -215,9 +215,9 @@ class UMP(object):
             return ctypes.windll.LoadLibrary(os.path.join(path, "umsdk"))
         else:
             if cls._lib_path is not None:
-                return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, "libump.so.1.0.0"))
+                return ctypes.cdll.LoadLibrary(os.path.join(cls._lib_path, "libum.so"))
 
-            return ctypes.cdll.LoadLibrary(os.path.join(path, "libump.so.1.0.0"))
+            return ctypes.cdll.LoadLibrary(os.path.join(path, "libum.so"))
 
     @classmethod
     def get_um_state_class(cls):
@@ -341,14 +341,13 @@ class UMP(object):
     def set_max_acceleration(self, dev, max_acc):
         self.max_acceleration[dev] = max_acc
 
-    def open(self, address=None, group=LIBUM_DEF_GROUP):
+    def open(self, address=None, group=None):
         """Open the UM device at the given address.
         
         The default address "169.254.255.255" should suffice in most situations.
         """
-        if address is None:
-            address = LIBUM_DEF_BCAST_ADDRESS
-
+        address = LIBUM_DEF_BCAST_ADDRESS if address is None else address
+        group = LIBUM_DEF_GROUP if group is None else group
         if self.h is not None:
             raise TypeError("UM is already open.")
         addr = ctypes.create_string_buffer(address)

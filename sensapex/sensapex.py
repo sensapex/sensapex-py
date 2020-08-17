@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import atexit
 import ctypes
 import os
@@ -27,9 +25,6 @@ from ctypes import (
 from timeit import default_timer
 
 import numpy as np
-from six.moves import map
-from six.moves import range
-from six.moves import zip
 
 SOCKET = c_int
 if sys.platform == "win32" and platform.architecture()[0] == "64bit":

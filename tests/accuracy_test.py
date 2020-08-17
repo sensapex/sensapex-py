@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import argparse
 import sys
 import time
@@ -7,8 +5,6 @@ import time
 import numpy as np
 import pyqtgraph as pg
 from sensapex import UMP
-from six.moves import map
-from six.moves import range
 
 parser = argparse.ArgumentParser(
     description="Test for sensapex devices; perform a series of random moves while rapidly polling the device position and state."

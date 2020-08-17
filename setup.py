@@ -21,6 +21,9 @@ setup(
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
     description="Python wrapper for the Sensapex SDK",
+    install_requires=[
+        "numpy",
+    ],
     license="MIT",
     long_description=long_description,
     long_description_content_type="text/markdown",

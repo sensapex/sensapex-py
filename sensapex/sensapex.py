@@ -259,14 +259,11 @@ class UMP(object):
         self.lib.um_errorstr.restype = c_char_p
 
         min_version = (0, 918)
-        min_version_str = "v%d.%d" % min_version
+        min_version_str = "v{:d}.{:d}".format(*min_version)
         version_str = self.sdk_version()
         version = tuple(map(int, version_str.lstrip(b"v").split(b".")))
 
-        assert version >= min_version, "SDK version %s or later required (your version is %s)" % (
-            min_version_str,
-            version_str,
-        )
+        assert version >= min_version, f"SDK version {min_version_str} or later required (your version is {version_str})"
 
         self.h = None
         self.open(address=address, group=group)
@@ -295,7 +292,7 @@ class UMP(object):
         if dev_id not in self.devices:
             all_devs = self.list_devices()
             if dev_id not in all_devs:
-                raise Exception("Invalid sensapex device ID %s. Options are: %r" % (dev_id, all_devs))
+                raise Exception(f"Invalid sensapex device ID {dev_id}. Options are: {all_devs!r}")
             self.devices[dev_id] = SensapexDevice(dev_id)
         return self.devices[dev_id]
 
@@ -333,9 +330,9 @@ class UMP(object):
                 errstr = self.lib.um_errorstr(err)
                 if err == -1:
                     oserr = self.lib.um_last_os_errno(self.h)
-                    raise UMError("UM OS Error %d: %s" % (oserr, os.strerror(oserr)), None, oserr)
+                    raise UMError(f"UM OS Error {oserr:d}: {os.strerror(oserr)}", None, oserr)
                 else:
-                    raise UMError("UM Error %d: %s  From %s%r" % (err, errstr, fn, args), err, None)
+                    raise UMError(f"UM Error {err:d}: {errstr}  From {fn}{args!r}", err, None)
             return rval
 
     def set_max_acceleration(self, dev, max_acc):
@@ -515,10 +512,10 @@ class UMP(object):
         return self.call("um_set_param", c_int(dev), c_int(param), value)
 
     def calibrate_zero_position(self, dev):
-        self.call("um_init_zero", X_AXIS | Y_AXIS | Z_AXIS | D_AXIS)
+        self.call("um_init_zero", dev, X_AXIS | Y_AXIS | Z_AXIS | D_AXIS)
 
     def calibrate_load(self, dev):
-        self.call("ump_calibrate_load")
+        self.call("ump_calibrate_load", dev)
 
     def get_soft_start_state(self, dev):
         feature_soft_start = 33

@@ -1,6 +1,8 @@
 # Sensapex SDK
 
-This python library wraps the C SDK provided by Sensapex's umsdk. It provides general access to the functions present therein, as well as a device-based abstraction.
+This python library wraps the C SDK provided by Sensapex's umsdk. It provides
+general access to the functions present therein, as well as a device-based
+abstraction.
 
 ### Installation
 
@@ -27,15 +29,27 @@ pressure = ump.get_device(30)
 pressure.set_pressure(1, 2.3e-4)
 ```
 
-Also included are some simple sanity checks. The following will report on all devices present:
+Also included are some simple sanity checks. The following will report on all 
+devices present:
 
 ```bash
 python -m sensapex.test
 ```
 
-Or for a more involved test of your hardware as it moves around randomly, install [pyqtgraph](https://pyqtgraph.org) in your environment and use e.g.:
+Or for a more involved test of your hardware as it moves around randomly,
+install [pyqtgraph](https://pyqtgraph.org) in your environment and use e.g.:
 
 ```bash
 STAGE_DEVID=1
 python -m sensapex.accuracy_test $STAGE_DEVID
 ```
+
+### Authorship
+
+Copyright (c) 2016-2020 Luke Campagnola
+
+Thanks to the following for contributions:
+
+ * Ari Salmi
+ * Martin Chase
+ * Thomas Braun

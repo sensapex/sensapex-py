@@ -10,6 +10,7 @@ parser = argparse.ArgumentParser(
     description="Test for sensapex devices; perform a series of random moves while rapidly polling the device position and state."
 )
 parser.add_argument("device", type=int, help="Device ID to test")
+parser.add_argument("--library-path", type=str, dest="library_path", default=".", help="Folder containing the umsdk library")
 parser.add_argument("--group", type=int, default=0, help="Device group number")
 parser.add_argument(
     "--x", action="store_true", default=False, dest="x", help="True = Random X axis values. False = keep start position"
@@ -50,6 +51,7 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
+UMP.set_library_path(args.library_path)
 ump = UMP.get_ump(group=args.group)
 time.sleep(2)
 devids = ump.list_devices()

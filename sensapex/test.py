@@ -7,7 +7,9 @@ from sensapex import SensapexDevice, UMP
 parser = argparse.ArgumentParser(
     description="Test for sensapex devices; prints position and status updates continuously."
 )
-parser.add_argument("--library-path", type=str, dest="library_path", default=".", help="Folder containing the umsdk library")
+parser.add_argument(
+    "--library-path", type=str, dest="library_path", default=".", help="Folder containing the umsdk library"
+)
 parser.add_argument("--group", type=int, default=0, help="Device group number")
 args = parser.parse_args()
 

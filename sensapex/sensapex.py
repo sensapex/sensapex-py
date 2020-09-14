@@ -247,8 +247,7 @@ class UMP(object):
         # duration that manipulator must be not busy before a move is considered complete.
         self.move_expire_time = 50e-3
 
-        # if we miss any axis by more than 0.5 um, try again
-        self.retry_threshold = np.array([0.5, 0.5, 0.5, 0.5])
+        self.set_retry_threshold(0.4)
 
         # retry up to 3 times, then fail
         self.max_move_retry = 3
@@ -536,6 +535,17 @@ class UMP(object):
     def set_soft_start_value(self, dev, value):
         return self.set_um_param(dev, 15, value)
 
+    def set_retry_threshold(self, threshold):
+        """
+        If we miss any axis by too much, try again.
+
+        Parameters
+        ----------
+        threshold : float
+            Maximum allowable error in µm.
+        """
+        self._retry_threshold = np.array([threshold] * 4)
+
     def recv_all(self):
         """Receive all queued position/status update packets and update any pending moves.
         """
@@ -552,7 +562,7 @@ class UMP(object):
                     target = np.array(move_req.target_pos).astype(float)
                     err = np.abs(pos - target)
                     mask = np.isfinite(err)
-                    reached_target = np.all(err[mask] < self.retry_threshold[: len(mask)][mask])
+                    reached_target = np.all(err[mask] < self._retry_threshold[: len(mask)][mask])
                     if reached_target or move_req.retry_count >= self.max_move_retry:
                         move.finish(pos)
                     else:

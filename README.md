@@ -6,7 +6,7 @@ abstraction.
 
 ### Installation
 
-`pip install sensapex-py`
+`pip install sensapex`
 
 Download [the latest umsdk library](http://dist.sensapex.com/misc/um-sdk/rc/).
 

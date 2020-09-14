@@ -317,8 +317,11 @@ class UMP(object):
         c = self._axis_counts.get(dev, None)
         if c is None:
             c = self.call("um_get_axis_count", dev)
-            self._axis_counts[dev] = c
+            self.set_axis_count(dev, c)
         return c
+
+    def set_axis_count(self, dev, count):
+        self._axis_counts[dev] = count
 
     def call(self, fn, *args):
         with self.lock:
@@ -401,6 +404,8 @@ class UMP(object):
             If True, then axis speeds are scaled to produce more linear movement
         max_acceleration : int
             Maximum acceleration in um/s^2
+        _request : MoveRequest
+            Used internally
 
         Returns
         -------
@@ -572,7 +577,7 @@ class SensapexDevice(object):
         self.ump = UMP.get_ump()
 
         # Save max acceleration from config
-        if max_acceleration == None:
+        if max_acceleration is None:
             max_acceleration = 0
         self.set_max_acceleration(max_acceleration)
 
@@ -588,7 +593,7 @@ class SensapexDevice(object):
             self.add_callback(callback)
 
     def set_n_axes(self, n_axes):
-        self.ump._axis_counts[self.devid] = n_axes
+        self.ump.set_axis_count(self.devid, n_axes)
 
     def set_max_acceleration(self, max_acceleration):
         self.ump.set_max_acceleration(self.devid, max_acceleration)
@@ -618,6 +623,8 @@ class SensapexDevice(object):
         """
         Parameters
         ----------
+        channel : int
+            channel number
         value : float
             pressure in kPa
         """
@@ -676,7 +683,7 @@ class PollThread(threading.Thread):
     device IDs from which position updates have been received.
     """
 
-    def __init__(self, ump, callback=None, interval=0.03):
+    def __init__(self, ump, interval=0.03):
         self.ump = ump
         self.callbacks = {}
         self.interval = interval
@@ -731,6 +738,3 @@ class PollThread(threading.Thread):
                 print("Error in sensapex poll thread:")
                 sys.excepthook(*sys.exc_info())
                 time.sleep(1)
-            except:
-                print("Uncaught")
-                raise

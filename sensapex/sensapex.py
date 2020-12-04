@@ -381,18 +381,16 @@ class UMP(object):
         self.call("um_get_positions", c_int(dev), timeout, *[byref(x) for x in xyzwe])
 
         n_axes = self.axis_count(dev)
-        # if dev == 9:
-        #    return [-x.value for x in xyzwe[:n_axes]]
         return [x.value for x in xyzwe[:n_axes]]
 
-    def goto_pos(self, dev, pos, speed, simultaneous=True, linear=False, max_acceleration=0, _request=None):
+    def goto_pos(self, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, _request=None):
         """Request the specified device to move to an absolute position (in um).
 
         Parameters
         ----------
         dev : int
             ID of device to move
-        pos : array-like
+        dest : array-like
             X,Y,Z,W coordinates to move to. Values may be NaN or omitted to leave
             the axis unaffected.
         speed : float
@@ -400,7 +398,7 @@ class UMP(object):
         simultaneous: bool
             If True, then all axes begin moving at the same time
         linear : bool
-            If True, then axis speeds are scaled to produce more linear movement
+            If True, then axis speeds are scaled to produce more linear movement, requires simultaneous
         max_acceleration : int
             Maximum acceleration in um/s^2
         _request : MoveRequest
@@ -411,16 +409,17 @@ class UMP(object):
         move_id : int
             Unique ID that can be used to retrieve the status of this move at a later time.
         """
+        linear = linear and simultaneous
         kwargs = {
             "dev": dev,
-            "pos": pos,
+            "pos": dest,
             "speed": speed,
             "simultaneous": simultaneous,
             "linear": linear,
             "max_acceleration": max_acceleration,
         }
-        pos = [float(x) for x in pos]
-        pos4 = pos + [float("nan")] * (4 - len(pos))  # extend to 4 values
+        dest = [float(x) for x in dest]
+        pos4 = dest + [float("nan")] * (4 - len(dest))  # extend to 4 values
 
         mode = int(bool(simultaneous))  # all axes move simultaneously
 
@@ -429,10 +428,10 @@ class UMP(object):
         dist = max(1, np.linalg.norm(diff))
         original_speed = speed
         if linear:
-            speed = [max(1, speed * abs(d / dist)) for d in diff]
+            speed = [max(1., speed * abs(d / dist)) for d in diff]
             speed = speed + [0] * (4 - len(speed))
         else:
-            speed = [max(1, speed)] * 4  # speed < 1 crashes the uMp
+            speed = [max(1., speed)] * 4  # speed < 1 crashes the uMp
 
         if max_acceleration == 0 or max_acceleration is None:
             if self.max_acceleration[dev] is not None:
@@ -450,7 +449,7 @@ class UMP(object):
                 last_move.interrupt("started another move before the previous finished")
 
             if _request is None:
-                next_move = MoveRequest(dev, current_pos, pos, original_speed, duration, kwargs)
+                next_move = MoveRequest(dev, current_pos, dest, original_speed, duration, kwargs)
             else:
                 # We are retrying a previous move; re-use the old request object.
                 next_move = _request
@@ -554,9 +553,13 @@ class UMP(object):
 
     def _update_moves(self):
         with self.lock:
-            for dev, move in list(self._last_move.items()):
+            for dev in self._last_move:
                 if not self.is_busy(dev):
-                    move_req = self._last_move.pop(dev)
+                    move_req = self._last_move[dev]
+                    if move_req.has_multistep_moves_left_to_do():
+                        move_req.do_next_move()
+                        continue
+                    self._last_move.pop(dev)
 
                     pos = np.array(self.get_pos(dev, timeout=-1))
                     target = np.array(move_req.target_pos).astype(float)
@@ -564,7 +567,7 @@ class UMP(object):
                     mask = np.isfinite(err)
                     reached_target = np.all(err[mask] < self._retry_threshold[: len(mask)][mask])
                     if reached_target or move_req.retry_count >= self.max_move_retry:
-                        move.finish(pos)
+                        move_req.finish(pos)
                     else:
                         # retry move if we missed the target
                         move_req.retry_count += 1

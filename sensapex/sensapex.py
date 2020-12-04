@@ -23,6 +23,7 @@ from ctypes import (
     c_float,
 )
 from timeit import default_timer
+from typing import Dict
 
 import numpy as np
 
@@ -133,34 +134,93 @@ class um_state_pre_v0_600(Structure):
 
 
 class MoveRequest(object):
-    """Simple class for tracking the status of requested moves.
+    """Class for coordinating and tracking moves.
     """
+    max_retries = 3
 
-    def __init__(self, dev, start_pos, target_pos, speed, duration, kwargs):
+    def __init__(self, ump, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, retry_threshold=0.4):
+        dest = [float(x) for x in dest]
+
         self.dev = dev
-        self.start_time = timer()
-        self.estimated_duration = duration
-        self.start_pos = start_pos
-        self.target_pos = target_pos
-        self.speed = speed
-        self.kwargs = kwargs
         self.finished = False
-        self.interrupted = False
-        self.interrupt_reason = None
-        self.last_pos = None
         self.finished_event = threading.Event()
-        self.retry_count = 0
+        self.interrupt_reason = None
+        self.interrupted = False
+        self.last_pos = None
+        self._retries = 0
+        self._retry_threshold = np.array([retry_threshold] * 4)
+        self.speed = speed
+        self.start_time = timer()
+        self.target_pos = dest
+        self.ump = ump
+
+        linear = linear and simultaneous
+        pos4 = dest + [float("nan")] * (4 - len(dest))  # extend to 4 values
+
+        mode = int(bool(simultaneous))  # all axes move simultaneously
+
+        self.start_pos = self._read_position()
+        diff = [float(p - c) for p, c in zip(pos4, self.start_pos) if p is not None]
+        dist = max(1., np.linalg.norm(diff))
+        if linear:
+            speed = [max(1., speed * abs(d / dist)) for d in diff]
+            speed = speed + [0] * (4 - len(speed))
+        else:
+            speed = [max(1., speed)] * 4  # speed < 1 crashes the uMp
+
+        if max_acceleration == 0 or max_acceleration is None:
+            if self.ump.default_max_accelerations[dev] is not None:
+                max_acceleration = self.ump.default_max_accelerations[dev]
+            else:
+                max_acceleration = 0
+
+        if simultaneous:
+            self.estimated_duration = max(np.array(diff) / speed[: len(diff)])
+        else:
+            self.estimated_duration = sum(np.array(diff) / speed[: len(diff)])
+
+        self.args = [c_int(dev)] + [c_float(x) for x in pos4] + [c_int(int(x)) for x in speed + [mode] + [max_acceleration]]
 
     def interrupt(self, reason):
+        self.ump.call("um_stop", c_int(self.dev))
         self.interrupt_reason = reason
         self.interrupted = True
         self.finished = True
         self.finished_event.set()
 
-    def finish(self, pos):
-        self.last_pos = pos
+    def finish(self):
+        self.last_pos = self._read_position()
         self.finished = True
         self.finished_event.set()
+
+    def start(self):
+        self.ump.call("um_goto_position_ext", *self.args)
+
+    def is_in_progress(self):
+        return self.ump.is_busy(self.dev)
+
+    def can_retry(self):
+        return self._retries < self.max_retries
+
+    def _read_position(self):
+        return np.array(self.ump.get_pos(self.dev, timeout=-1))
+
+    def is_close_enough(self):
+        pos = self._read_position()
+        target = np.array(self.target_pos).astype(float)
+        err = np.abs(pos - target)
+        mask = np.isfinite(err)
+        return np.all(err[mask] < self._retry_threshold[: len(mask)][mask])
+
+    def retry(self):
+        self._retries += 1
+        self.start()
+
+    def has_more_calls_to_make(self):
+        return False
+
+    def make_next_call(self):
+        pass
 
 
 class UMError(Exception):
@@ -183,6 +243,7 @@ class UMP(object):
     
     All calls except get_ump are thread-safe.
     """
+    _last_move: Dict[int, MoveRequest]
 
     _lib = None
     _lib_path = None
@@ -247,12 +308,8 @@ class UMP(object):
         # duration that manipulator must be not busy before a move is considered complete.
         self.move_expire_time = 50e-3
 
-        self.set_retry_threshold(0.4)
-
-        # retry up to 3 times, then fail
-        self.max_move_retry = 3
-
-        self.max_acceleration = {}
+        self._retry_threshold = 0.4
+        self.default_max_accelerations = {}
 
         self.lib = self.get_lib()
         self.lib.um_errorstr.restype = c_char_p
@@ -338,7 +395,7 @@ class UMP(object):
             return rval
 
     def set_max_acceleration(self, dev, max_acc):
-        self.max_acceleration[dev] = max_acc
+        self.default_max_accelerations[dev] = max_acc
 
     def open(self, address=None, group=None):
         """Open the UM device at the given address.
@@ -383,7 +440,7 @@ class UMP(object):
         n_axes = self.axis_count(dev)
         return [x.value for x in xyzwe[:n_axes]]
 
-    def goto_pos(self, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, _request=None):
+    def goto_pos(self, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0):
         """Request the specified device to move to an absolute position (in um).
 
         Parameters
@@ -401,62 +458,21 @@ class UMP(object):
             If True, then axis speeds are scaled to produce more linear movement, requires simultaneous
         max_acceleration : int
             Maximum acceleration in um/s^2
-        _request : MoveRequest
-            Used internally
 
         Returns
         -------
         move_id : int
             Unique ID that can be used to retrieve the status of this move at a later time.
         """
-        linear = linear and simultaneous
-        kwargs = {
-            "dev": dev,
-            "pos": dest,
-            "speed": speed,
-            "simultaneous": simultaneous,
-            "linear": linear,
-            "max_acceleration": max_acceleration,
-        }
-        dest = [float(x) for x in dest]
-        pos4 = dest + [float("nan")] * (4 - len(dest))  # extend to 4 values
-
-        mode = int(bool(simultaneous))  # all axes move simultaneously
-
-        current_pos = self.get_pos(dev)
-        diff = [float(p - c) for p, c in zip(pos4, current_pos) if p is not None]
-        dist = max(1, np.linalg.norm(diff))
-        original_speed = speed
-        if linear:
-            speed = [max(1., speed * abs(d / dist)) for d in diff]
-            speed = speed + [0] * (4 - len(speed))
-        else:
-            speed = [max(1., speed)] * 4  # speed < 1 crashes the uMp
-
-        if max_acceleration == 0 or max_acceleration is None:
-            if self.max_acceleration[dev] is not None:
-                max_acceleration = self.max_acceleration[dev]
-            else:
-                max_acceleration = 0
-
-        args = [c_int(dev)] + [c_float(x) for x in pos4] + [c_int(int(x)) for x in speed + [mode] + [max_acceleration]]
-        duration = max(np.array(diff) / speed[: len(diff)])
-
+        next_move = MoveRequest(self, dev, dest, speed, simultaneous, linear, max_acceleration, self._retry_threshold)
         with self.lock:
             last_move = self._last_move.pop(dev, None)
             if last_move is not None:
-                self.call("um_stop", c_int(dev))
                 last_move.interrupt("started another move before the previous finished")
-
-            if _request is None:
-                next_move = MoveRequest(dev, current_pos, dest, original_speed, duration, kwargs)
-            else:
-                # We are retrying a previous move; re-use the old request object.
-                next_move = _request
 
             self._last_move[dev] = next_move
 
-            self.call("um_goto_position_ext", *args)
+            next_move.start()
 
         return next_move
 
@@ -543,7 +559,7 @@ class UMP(object):
         threshold : float
             Maximum allowable error in µm.
         """
-        self._retry_threshold = np.array([threshold] * 4)
+        self._retry_threshold = threshold
 
     def recv_all(self):
         """Receive all queued position/status update packets and update any pending moves.
@@ -553,25 +569,16 @@ class UMP(object):
 
     def _update_moves(self):
         with self.lock:
-            for dev in self._last_move:
-                if not self.is_busy(dev):
-                    move_req = self._last_move[dev]
-                    if move_req.has_multistep_moves_left_to_do():
-                        move_req.do_next_move()
-                        continue
+            for dev, move in self._last_move.items():
+                if move.is_in_progress():
+                    continue
+                if move.has_more_calls_to_make():
+                    move.make_next_call()
+                elif move.can_retry() and not move.is_close_enough():
+                    move.retry()
+                else:
                     self._last_move.pop(dev)
-
-                    pos = np.array(self.get_pos(dev, timeout=-1))
-                    target = np.array(move_req.target_pos).astype(float)
-                    err = np.abs(pos - target)
-                    mask = np.isfinite(err)
-                    reached_target = np.all(err[mask] < self._retry_threshold[: len(mask)][mask])
-                    if reached_target or move_req.retry_count >= self.max_move_retry:
-                        move_req.finish(pos)
-                    else:
-                        # retry move if we missed the target
-                        move_req.retry_count += 1
-                        self.goto_pos(_request=move_req, **move_req.kwargs)
+                    move.finish()
 
 
 class SensapexDevice(object):

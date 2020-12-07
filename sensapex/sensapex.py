@@ -156,12 +156,13 @@ class MoveRequest(object):
         self.ump = ump
 
         linear = linear and simultaneous
-        pos4 = dest + [float("nan")] * (4 - len(dest))  # extend to 4 values
+        dest4 = dest + [float("nan")] * (4 - len(dest))  # extend to 4 values
+        dest4 = [d if d is not None else float("nan") for d in dest4]
 
         self.start_pos = self._read_position()
-        diff = [float(p - c) for p, c in zip(pos4, self.start_pos) if p is not None]
-        dist = max(1., np.linalg.norm(diff))
+        diff = [float(d - c) for d, c in zip(dest4, self.start_pos) if d != float("nan")]
         if linear:
+            dist = max(1., np.linalg.norm(diff))
             speed = [max(1., speed * abs(d / dist)) for d in diff]
             speed = speed + [0] * (4 - len(speed))
         else:
@@ -175,31 +176,31 @@ class MoveRequest(object):
 
         if simultaneous:
             self.estimated_duration = max(np.array(diff) / speed[: len(diff)])
-            self._moves = (self._movement_args(max_acceleration, pos4, speed, simultaneous),)
+            self._moves = (self._movement_args(max_acceleration, dest4, speed, simultaneous),)
         else:
             self.estimated_duration = sum(np.array(diff) / speed[: len(diff)])
-            # TODO handle nan for x, as well as start == dest
             if self.start_pos[0] < dest[0]:  # starting behind the dest means insertion
-                just_y = pos4[:]
-                just_y[0] = self.start_pos[0]
-                just_y[2] = self.start_pos[2]
-                just_yz = pos4[:]
-                just_yz[0] = self.start_pos[0]
+                just_y = dest4[:]
+                just_y[0] = float("nan")
+                just_y[2] = float("nan")
+                just_yz = dest4[:]
+                just_yz[0] = float("nan")
                 self._moves = (
                     self._movement_args(max_acceleration, just_y, speed, simultaneous),
                     self._movement_args(max_acceleration, just_yz, speed, simultaneous),
-                    self._movement_args(max_acceleration, pos4, speed, simultaneous),
+                    self._movement_args(max_acceleration, dest4, speed, simultaneous),
                 )
             else:  # extraction
-                just_x = pos4[:]
-                just_x[1] = self.start_pos[1]
-                just_x[2] = self.start_pos[2]
-                just_xz = pos4[:]
-                just_xz[1] = self.start_pos[1]
+                # TODO handle nan for x, as well as start == dest?
+                just_x = dest4[:]
+                just_x[1] = float("nan")
+                just_x[2] = float("nan")
+                just_xz = dest4[:]
+                just_xz[1] = float("nan")
                 self._moves = (
                     self._movement_args(max_acceleration, just_x, speed, simultaneous),
                     self._movement_args(max_acceleration, just_xz, speed, simultaneous),
-                    self._movement_args(max_acceleration, pos4, speed, simultaneous),
+                    self._movement_args(max_acceleration, dest4, speed, simultaneous),
                 )
 
     def _movement_args(self, max_acceleration, pos4, speed, simultaneous):

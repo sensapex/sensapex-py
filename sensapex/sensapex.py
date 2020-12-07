@@ -141,6 +141,7 @@ class MoveRequest(object):
     def __init__(self, ump, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, retry_threshold=0.4):
         dest = [float(x) for x in dest]
 
+        self._next_move_index = 0
         self.dev = dev
         self.finished = False
         self.finished_event = threading.Event()
@@ -156,8 +157,6 @@ class MoveRequest(object):
 
         linear = linear and simultaneous
         pos4 = dest + [float("nan")] * (4 - len(dest))  # extend to 4 values
-
-        mode = int(bool(simultaneous))  # all axes move simultaneously
 
         self.start_pos = self._read_position()
         diff = [float(p - c) for p, c in zip(pos4, self.start_pos) if p is not None]
@@ -176,10 +175,36 @@ class MoveRequest(object):
 
         if simultaneous:
             self.estimated_duration = max(np.array(diff) / speed[: len(diff)])
+            self._moves = (self._movement_args(max_acceleration, pos4, speed, simultaneous),)
         else:
             self.estimated_duration = sum(np.array(diff) / speed[: len(diff)])
+            # TODO handle nan for x, as well as start == dest
+            if self.start_pos[0] < dest[0]:  # starting behind the dest means insertion
+                just_y = pos4[:]
+                just_y[0] = self.start_pos[0]
+                just_y[2] = self.start_pos[2]
+                just_yz = pos4[:]
+                just_yz[0] = self.start_pos[0]
+                self._moves = (
+                    self._movement_args(max_acceleration, just_y, speed, simultaneous),
+                    self._movement_args(max_acceleration, just_yz, speed, simultaneous),
+                    self._movement_args(max_acceleration, pos4, speed, simultaneous),
+                )
+            else:  # extraction
+                just_x = pos4[:]
+                just_x[1] = self.start_pos[1]
+                just_x[2] = self.start_pos[2]
+                just_xz = pos4[:]
+                just_xz[1] = self.start_pos[1]
+                self._moves = (
+                    self._movement_args(max_acceleration, just_x, speed, simultaneous),
+                    self._movement_args(max_acceleration, just_xz, speed, simultaneous),
+                    self._movement_args(max_acceleration, pos4, speed, simultaneous),
+                )
 
-        self.args = [c_int(dev)] + [c_float(x) for x in pos4] + [c_int(int(x)) for x in speed + [mode] + [max_acceleration]]
+    def _movement_args(self, max_acceleration, pos4, speed, simultaneous):
+        mode = int(bool(simultaneous))  # whether all axes move simultaneously
+        return [c_int(self.dev)] + [c_float(x) for x in pos4] + [c_int(int(x)) for x in speed + [mode] + [max_acceleration]]
 
     def interrupt(self, reason):
         self.ump.call("um_stop", c_int(self.dev))
@@ -194,7 +219,8 @@ class MoveRequest(object):
         self.finished_event.set()
 
     def start(self):
-        self.ump.call("um_goto_position_ext", *self.args)
+        self._next_move_index = 0
+        self.make_next_call()
 
     def is_in_progress(self):
         return self.ump.is_busy(self.dev)
@@ -217,10 +243,11 @@ class MoveRequest(object):
         self.start()
 
     def has_more_calls_to_make(self):
-        return False
+        return self._next_move_index < len(self._moves)
 
     def make_next_call(self):
-        pass
+        self.ump.call("um_goto_position_ext", *self._moves[self._next_move_index])
+        self._next_move_index += 1
 
 
 class UMError(Exception):

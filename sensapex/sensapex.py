@@ -620,8 +620,8 @@ class SensapexDevice(object):
         dev.goto_pos(pos, speed=10)
     """
 
-    def __init__(self, devID: int, callback=None, n_axes=None, max_acceleration=0):
-        self.devID = devID
+    def __init__(self, dev_id: int, callback=None, n_axes=None, max_acceleration=0):
+        self.dev_id = dev_id
         self.ump = UMP.get_ump()
 
         # Save max acceleration from config
@@ -634,36 +634,36 @@ class SensapexDevice(object):
         if n_axes is not None:
             self.set_n_axes(n_axes)
 
-        self.ump.poller.add_callback(devID, self._change_callback)
+        self.ump.poller.add_callback(dev_id, self._change_callback)
         self.callbacks = []
 
         if callback is not None:
             self.add_callback(callback)
 
     def set_n_axes(self, n_axes):
-        self.ump.set_axis_count(self.devID, n_axes)
+        self.ump.set_axis_count(self.dev_id, n_axes)
 
     def set_max_acceleration(self, max_acceleration):
-        self.ump.set_max_acceleration(self.devID, max_acceleration)
+        self.ump.set_max_acceleration(self.dev_id, max_acceleration)
 
     def add_callback(self, callback):
         self.callbacks.append(callback)
 
     def get_pos(self, timeout=None):
-        return self.ump.get_pos(self.devID, timeout=timeout)
+        return self.ump.get_pos(self.dev_id, timeout=timeout)
 
     def goto_pos(self, pos, speed, simultaneous=True, linear=False, max_acceleration=0):
         return self.ump.goto_pos(
-            self.devID, pos, speed, simultaneous=simultaneous, linear=linear, max_acceleration=max_acceleration
+            self.dev_id, pos, speed, simultaneous=simultaneous, linear=linear, max_acceleration=max_acceleration
         )
 
     def is_busy(self):
-        return self.ump.is_busy(self.devID)
+        return self.ump.is_busy(self.dev_id)
 
     def stop(self):
-        return self.ump.stop(self.devID)
+        return self.ump.stop(self.dev_id)
 
-    def _change_callback(self, devid, new_pos, old_pos):
+    def _change_callback(self, dev_id, new_pos, old_pos):
         for cb in self.callbacks:
             cb(self, new_pos, old_pos)
 
@@ -676,7 +676,7 @@ class SensapexDevice(object):
         value : float
             pressure in kPa
         """
-        return self.ump.set_pressure(self.devID, int(channel), float(value))
+        return self.ump.set_pressure(self.dev_id, int(channel), float(value))
 
     def get_pressure(self, channel):
         """
@@ -685,40 +685,40 @@ class SensapexDevice(object):
         float
             pressure in kPa
         """
-        return self.ump.get_pressure(self.devID, int(channel))
+        return self.ump.get_pressure(self.dev_id, int(channel))
 
     def set_valve(self, channel, value):
-        return self.ump.set_valve(self.devID, int(channel), int(value))
+        return self.ump.set_valve(self.dev_id, int(channel), int(value))
 
     def get_valve(self, channel):
-        return self.ump.get_valve(self.devID, int(channel))
+        return self.ump.get_valve(self.dev_id, int(channel))
 
     def set_lens_position(self, pos):
-        return self.ump.call("ums_set_lens_position", c_int(self.devID), c_int(pos))
+        return self.ump.call("ums_set_lens_position", c_int(self.dev_id), c_int(pos))
 
     def get_lens_position(self):
-        return self.ump.call("ums_get_lens_position", c_int(self.devID))
+        return self.ump.call("ums_get_lens_position", c_int(self.dev_id))
 
     def set_custom_slow_speed(self, enabled):
-        return self.ump.set_custom_slow_speed(self.devID, enabled)
+        return self.ump.set_custom_slow_speed(self.dev_id, enabled)
 
     def calibrate_zero_position(self):
-        self.ump.calibrate_zero_position(self.devID)
+        self.ump.calibrate_zero_position(self.dev_id)
 
     def calibrate_load(self):
-        self.ump.calibrate_load(self.devID)
+        self.ump.calibrate_load(self.dev_id)
 
     def get_soft_start_state(self):
-        return self.ump.get_soft_start_state(self.devID)
+        return self.ump.get_soft_start_state(self.dev_id)
 
     def set_soft_start_state(self, enabled):
-        return self.ump.set_soft_start_state(self.devID, enabled)
+        return self.ump.set_soft_start_state(self.dev_id, enabled)
 
     def get_soft_start_value(self):
-        return self.ump.get_soft_start_value(self.devID).value
+        return self.ump.get_soft_start_value(self.dev_id).value
 
     def set_soft_start_value(self, value):
-        return self.ump.set_soft_start_value(self.devID, value)
+        return self.ump.set_soft_start_value(self.dev_id, value)
 
 
 class PollThread(threading.Thread):

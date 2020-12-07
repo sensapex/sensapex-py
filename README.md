@@ -8,7 +8,7 @@ abstraction.
 
 `pip install sensapex`
 
-Download [the latest umsdk library](http://dist.sensapex.com/misc/um-sdk/rc/).
+Download [the latest umsdk library](http://dist.sensapex.com/misc/um-sdk/rc/) for your platform.
 
 ### Usage
 
@@ -53,3 +53,9 @@ Thanks to the following for contributions:
  * Ari Salmi
  * Martin Chase
  * Thomas Braun
+
+### Changelog
+
+#### 0.920.2
+
+* Workaround for sdk bug in motion planning

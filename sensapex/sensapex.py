@@ -569,7 +569,7 @@ class UMP(object):
 
     def _update_moves(self):
         with self.lock:
-            for dev, move in self._last_move.items():
+            for dev, move in list(self._last_move.items()):
                 if move.is_in_progress():
                     continue
                 if move.has_more_calls_to_make():

@@ -569,8 +569,8 @@ class UMP(object):
     def calibrate_load(self, dev):
         self.call("ump_calibrate_load", dev)
 
-    def calibrate_pressure(self, dev):
-        self.call("umc_pressure_calib", dev)
+    def calibrate_pressure(self, dev, channel, delay):
+        self.call("umc_pressure_calib", dev, channel, delay)
 
     def get_soft_start_state(self, dev):
         feature_soft_start = 33
@@ -725,8 +725,8 @@ class SensapexDevice(object):
     def calibrate_load(self):
         self.ump.calibrate_load(self.dev_id)
 
-    def calibrate_pressure(self):
-        self.ump.calibrate_pressure(self.dev_id)
+    def calibrate_pressure(self, channel, delay=0):
+        self.ump.calibrate_pressure(self.dev_id, channel, delay)
 
     def get_soft_start_state(self):
         return self.ump.get_soft_start_state(self.dev_id)

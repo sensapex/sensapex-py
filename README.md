@@ -56,6 +56,10 @@ Thanks to the following for contributions:
 
 ### Changelog
 
+#### 0.920.3
+
+* Expose more pressure functions.
+
 #### 0.920.2
 
 * Workaround for sdk bug in motion planning

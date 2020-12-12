@@ -536,6 +536,11 @@ class UMP(object):
         self.call("umc_get_pressure_setting", dev, int(channel), byref(p))
         return p.value
 
+    def measure_pressure(self, dev, channel):
+        p = c_float()
+        self.call("umc_measure_pressure", dev, int(channel), byref(p))
+        return p.value
+
     def set_valve(self, dev, channel, value):
         return self.call("umc_set_valve", dev, int(channel), int(value))
 
@@ -563,6 +568,9 @@ class UMP(object):
 
     def calibrate_load(self, dev):
         self.call("ump_calibrate_load", dev)
+
+    def calibrate_pressure(self, dev):
+        self.call("umc_pressure_calib", dev)
 
     def get_soft_start_state(self, dev):
         feature_soft_start = 33
@@ -683,9 +691,18 @@ class SensapexDevice(object):
         Returns
         -------
         float
-            pressure in kPa
+            expected pressure in kPa
         """
         return self.ump.get_pressure(self.dev_id, int(channel))
+
+    def measure_pressure(self, channel):
+        """
+        Returns
+        -------
+        float
+            actual pressure in kPa
+        """
+        return self.ump.measure_pressure(self.dev_id, int(channel))
 
     def set_valve(self, channel, value):
         return self.ump.set_valve(self.dev_id, int(channel), int(value))
@@ -707,6 +724,9 @@ class SensapexDevice(object):
 
     def calibrate_load(self):
         self.ump.calibrate_load(self.dev_id)
+
+    def calibrate_pressure(self):
+        self.ump.calibrate_pressure(self.dev_id)
 
     def get_soft_start_state(self):
         return self.ump.get_soft_start_state(self.dev_id)

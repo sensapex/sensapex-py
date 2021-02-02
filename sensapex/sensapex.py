@@ -452,6 +452,9 @@ class UMP(object):
             self.lib.um_close(self.h)
             self.h = None
 
+    def is_positionable(self, dev_id):
+        return dev_id != 30
+
     def get_pos(self, dev, timeout=0):
         """Return the absolute position of the specified device (in um).
         
@@ -794,9 +797,17 @@ class PollThread(threading.Thread):
                 for dev_id, dev_callbacks in callbacks.items():
                     if len(callbacks) == 0:
                         continue
-                    new_pos = ump.get_pos(dev_id, timeout=0)
-                    old_pos = last_pos.get(dev_id)
-                    if new_pos != old_pos:
+                    if ump.is_positionable(dev_id):
+                        new_pos = ump.get_pos(dev_id, timeout=0)
+                        old_pos = last_pos.get(dev_id)
+                        changed = new_pos != old_pos
+                    else:
+                        # TODO what do pressure devices need here?
+                        changed = False
+                        new_pos = None
+                        old_pos = None
+
+                    if changed:
                         for cb in dev_callbacks:
                             cb(dev_id, new_pos, old_pos)
 

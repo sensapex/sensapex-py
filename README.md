@@ -56,6 +56,10 @@ Thanks to the following for contributions:
 
 ### Changelog
 
+#### 0.920.4
+
+* Pressure devices don't need positioning callbacks
+
 #### 0.920.3
 
 * Expose more pressure functions.

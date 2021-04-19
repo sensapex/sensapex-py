@@ -344,10 +344,13 @@ class UMP(object):
 
         min_version = (0, 918)
         min_version_str = "v{:d}.{:d}".format(*min_version)
+        max_version = (0, 920)
+        max_version_str = "v{:d}.{:d}".format(*max_version)
         version_str = self.sdk_version()
         version = tuple(map(int, version_str.lstrip(b"v").split(b".")))
 
         assert version >= min_version, f"SDK version {min_version_str} or later required (your version is {version_str})"
+        assert version <= max_version, f"SDK version {max_version_str} or lower required (your version is {version_str})"
 
         self.h = None
         self.open(address=address, group=group)

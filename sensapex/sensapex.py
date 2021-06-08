@@ -309,9 +309,9 @@ class UMP(object):
         self.lib = self.get_lib()
         self.lib.um_errorstr.restype = c_char_p
 
-        min_version = (1, 1)
+        min_version = (1, 21)
         min_version_str = "v{:d}.{:d}".format(*min_version)
-        max_version = (1, 11)
+        max_version = (1, 21)
         max_version_str = "v{:d}.{:d}".format(*max_version)
         version_str = self.sdk_version()
         version = tuple(map(int, version_str.lstrip(b"v").split(b".")))
@@ -545,6 +545,9 @@ class UMP(object):
     def calibrate_pressure(self, dev, channel, delay):
         self.call("umc_pressure_calib", dev, channel, delay)
 
+    def led_control(self, dev, off):
+        self.call("ump_led_control", dev, off)
+
     def get_soft_start_state(self, dev):
         feature_soft_start = 33
         return self.call("um_get_ext_feature", c_int(dev), c_int(feature_soft_start))
@@ -700,6 +703,9 @@ class SensapexDevice(object):
 
     def calibrate_pressure(self, channel, delay=0):
         self.ump.calibrate_pressure(self.dev_id, channel, delay)
+
+    def set_led_enabled(self, on: bool):
+        self.ump.led_control(self.dev_id, c_int(0 if on else 1))
 
     def get_soft_start_state(self):
         return self.ump.get_soft_start_state(self.dev_id)

@@ -75,8 +75,7 @@ class um_positions(Structure):
     ]
 
 
-# used in v0.600 and later
-class um_state_v0_600(Structure):
+class um_state(Structure):
     _fields_ = [
         ("last_received_time", c_ulong),
         ("socket", SOCKET),
@@ -93,34 +92,6 @@ class um_state_v0_600(Structure):
         ("last_status", c_int * LIBUM_MAX_MANIPULATORS),
         ("drive_status", c_int * LIBUM_MAX_MANIPULATORS),
         ("drive_status_id", c_ushort * LIBUM_MAX_MANIPULATORS),
-        ("addresses", sockaddr_in * LIBUM_MAX_MANIPULATORS),
-        ("cu_address", sockaddr_in),
-        ("last_positions", um_positions * LIBUM_MAX_MANIPULATORS),
-        ("laddr", sockaddr_in),
-        ("raddr", sockaddr_in),
-        ("errorstr_buffer", c_char * LIBUM_MAX_LOG_LINE_LENGTH),
-        ("verbose", c_int),
-        ("log_func_ptr", log_func_ptr),
-        ("log_print_arg", c_void_p),
-    ]
-
-
-# used before v0.600
-class um_state_pre_v0_600(Structure):
-    _fields_ = [
-        ("last_received_time", c_ulong),
-        ("socket", SOCKET),
-        ("own_id", c_int),
-        ("message_id", c_int),
-        ("last_device_sent", c_int),
-        ("last_device_received", c_int),
-        ("retransmit_count", c_int),
-        ("refresh_time_limit", c_int),
-        ("last_error", c_int),
-        ("last_os_errno", c_int),
-        ("timeout", c_int),
-        ("udp_port", c_int),
-        ("last_status", c_int * LIBUM_MAX_MANIPULATORS),
         ("addresses", sockaddr_in * LIBUM_MAX_MANIPULATORS),
         ("cu_address", sockaddr_in),
         ("last_positions", um_positions * LIBUM_MAX_MANIPULATORS),
@@ -311,11 +282,7 @@ class UMP(object):
     @classmethod
     def get_um_state_class(cls):
         if cls._um_state is None:
-            version = cls.get_lib().um_get_version().decode("ascii")
-            if version >= "v0.600":
-                cls._um_state = um_state_v0_600
-            else:
-                cls._um_state = um_state_pre_v0_600
+            cls._um_state = um_state
         return cls._um_state
 
     @classmethod
@@ -342,9 +309,9 @@ class UMP(object):
         self.lib = self.get_lib()
         self.lib.um_errorstr.restype = c_char_p
 
-        min_version = (0, 918)
+        min_version = (1, 1)
         min_version_str = "v{:d}.{:d}".format(*min_version)
-        max_version = (0, 920)
+        max_version = (1, 11)
         max_version_str = "v{:d}.{:d}".format(*max_version)
         version_str = self.sdk_version()
         version = tuple(map(int, version_str.lstrip(b"v").split(b".")))
@@ -716,8 +683,8 @@ class SensapexDevice(object):
     def get_valve(self, channel):
         return self.ump.get_valve(self.dev_id, int(channel))
 
-    def set_lens_position(self, pos):
-        return self.ump.call("ums_set_lens_position", c_int(self.dev_id), c_int(pos))
+    def set_lens_position(self, pos, lift=LIBUM_ARG_UNDEF, dip=LIBUM_ARG_UNDEF):
+        return self.ump.call("ums_set_lens_position", c_int(self.dev_id), c_int(pos), c_float(lift), c_float(dip))
 
     def get_lens_position(self):
         return self.ump.call("ums_get_lens_position", c_int(self.dev_id))

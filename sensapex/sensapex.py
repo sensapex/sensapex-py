@@ -113,6 +113,7 @@ class MoveRequest(object):
         dest = [float(x) for x in dest]
 
         self._next_move_index = 0
+        self._last_pos_exception = None
         self.dev = dev
         self.finished = False
         self.finished_event = threading.Event()
@@ -186,9 +187,13 @@ class MoveRequest(object):
         self.finished_event.set()
 
     def finish(self):
-        self.last_pos = self._read_position()
-        self.finished = True
-        self.finished_event.set()
+        try:
+            self.last_pos = self._read_position()
+        except Exception as e:
+            self._last_pos_exception = e
+        finally:
+            self.finished = True
+            self.finished_event.set()
 
     def start(self):
         self._next_move_index = 0

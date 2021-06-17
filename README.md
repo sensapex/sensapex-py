@@ -56,6 +56,15 @@ Thanks to the following for contributions:
 
 ### Changelog
 
+#### 1.021.1
+
+* Move-finish error capture
+* Use new windows library name
+
+#### 1.021.0
+
+* Update to new version
+
 #### 0.920.4
 
 * Pressure devices don't need positioning callbacks

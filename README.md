@@ -56,6 +56,10 @@ Thanks to the following for contributions:
 
 ### Changelog
 
+#### 1.021.2
+
+* SDK version bump
+
 #### 1.021.1
 
 * Move-finish error capture

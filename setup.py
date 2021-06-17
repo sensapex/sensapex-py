@@ -31,5 +31,5 @@ setup(
     packages=find_packages(),
     python_requires=">=3.7",
     url="https://github.com/sensapex/sensapex-py",
-    version="1.021.1",  # in lock step with umsdk version
+    version="1.021.2",  # in lock step with umsdk version
 )

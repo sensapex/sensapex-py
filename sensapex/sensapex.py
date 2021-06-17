@@ -265,14 +265,14 @@ class UMP(object):
         path = os.path.abspath(os.path.dirname(__file__))
         if sys.platform == "win32":
             if cls._lib_path is not None:
-                return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, "umsdk"))
+                return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, "libum"))
 
             try:
-                return ctypes.windll.umsdk
+                return ctypes.windll.libum
             except OSError:
                 pass
 
-            return ctypes.windll.LoadLibrary(os.path.join(path, "umsdk"))
+            return ctypes.windll.LoadLibrary(os.path.join(path, "libum"))
         else:
             if cls._lib_path is not None:
                 return ctypes.cdll.LoadLibrary(os.path.join(cls._lib_path, "libum.so"))

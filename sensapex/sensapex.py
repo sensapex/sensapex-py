@@ -747,8 +747,7 @@ class PollThread(threading.Thread):
         self.interval = interval
         self.lock = threading.RLock()
         self.__stop = False
-        threading.Thread.__init__(self)
-        self.daemon = True
+        threading.Thread.__init__(self, daemon=True)
 
     def start(self):
         self.__stop = False

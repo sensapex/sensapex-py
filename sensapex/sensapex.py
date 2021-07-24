@@ -5,6 +5,7 @@ import platform
 import sys
 import threading
 import time
+from bisect import bisect
 from ctypes import (
     c_int,
     c_uint,
@@ -22,10 +23,13 @@ from ctypes import (
     Structure,
     c_float,
 )
+from ipaddress import IPv4Network
+from socket import AF_INET
 from timeit import default_timer
 from typing import Dict, List, Union
 
 import numpy as np
+import yaml
 
 SOCKET = c_int
 if sys.platform == "win32" and platform.architecture()[0] == "64bit":
@@ -320,6 +324,10 @@ class UMP(object):
         self.lib = self.get_lib()
         self.lib.um_errorstr.restype = c_char_p
 
+        self._save_exceptions_with_pcap: bool = False
+        self._exception_save_dir: str = "."
+        self._pcap_thread = PacketCaptureThread(self)
+
         min_version = (1, 21)
         min_version_str = "v{:d}.{:d}".format(*min_version)
         max_version = (1, 22)
@@ -348,6 +356,44 @@ class UMP(object):
         self.poller = PollThread(self)
         if start_poller:
             self.poller.start()
+
+    def set_packet_capture_on_exception(self, enabled: bool, output_dir: str = "."):
+        self._save_exceptions_with_pcap = enabled
+        self._exception_save_dir = output_dir
+        if enabled:
+            self._ensure_pcap_thread_will_work()
+            self._pcap_thread.start()
+            pass
+        else:
+            self._pcap_thread.stop()
+
+    def _save_exception(self, ex):
+        now = time.time()
+        with open(f"sensapex-exception-{now}.yaml", "w") as f:
+            f.write(
+                yaml.dump(
+                    {"exception": ex, "timestamp": now, "packets": self._pcap_thread.get_recent_captured_packets()}
+                )
+            )
+
+    def _ensure_pcap_thread_will_work(self):
+        import pcap
+
+        assert pcap is not None
+        if self.guess_network_interface() is None:
+            raise RuntimeError("Cannot guess network interface")
+
+    def guess_network_interface(self):
+        import psutil
+
+        ipv4_addr = IPv4Network(f"{self.broadcast_address}/32")
+        devs = psutil.net_if_addrs()
+        for name, networks in devs.items():
+            for net in networks:
+                if net.family == AF_INET:
+                    subnet = IPv4Network(f"{net.address}/{net.netmask}", strict=False)
+                    if ipv4_addr.subnet_of(subnet):
+                        return name
 
     def get_device(self, dev_id):
         """
@@ -391,19 +437,24 @@ class UMP(object):
         self._axis_counts[dev] = count
 
     def call(self, fn, *args):
-        with self.lock:
-            if self.h is None:
-                raise TypeError("UM is not open.")
-            rval = getattr(self.lib, fn)(self.h, *args)
-            if rval < 0:
-                err = self.lib.um_last_error(self.h)
-                errstr = self.lib.um_errorstr(err)
-                if err == -1:
-                    oserr = self.lib.um_last_os_errno(self.h)
-                    raise UMError(f"UM OS Error {oserr:d}: {os.strerror(oserr)}", None, oserr)
-                else:
-                    raise UMError(f"UM Error {err:d}: {errstr}  From {fn}{args!r}", err, None)
-            return rval
+        try:
+            with self.lock:
+                if self.h is None:
+                    raise TypeError("UM is not open.")
+                rval = getattr(self.lib, fn)(self.h, *args)
+                if rval < 0:
+                    err = self.lib.um_last_error(self.h)
+                    errstr = self.lib.um_errorstr(err)
+                    if err == -1:
+                        oserr = self.lib.um_last_os_errno(self.h)
+                        raise UMError(f"UM OS Error {oserr:d}: {os.strerror(oserr)}", None, oserr)
+                    else:
+                        raise UMError(f"UM Error {err:d}: {errstr}  From {fn}{args!r}", err, None)
+                return rval
+        except UMError as ex:
+            if self._save_exceptions_with_pcap:
+                self._save_exception(ex)
+            raise
 
     def set_max_acceleration(self, dev, max_acc):
         self.default_max_accelerations[dev] = max_acc
@@ -429,6 +480,9 @@ class UMP(object):
         if self.poller.is_alive():
             self.poller.stop()
             self.poller.join()
+        if self._pcap_thread.is_alive():
+            self._pcap_thread.stop()
+            self._pcap_thread.join()
         with self.lock:
             self.lib.um_close(self.h)
             self.h = None
@@ -803,3 +857,66 @@ class PollThread(threading.Thread):
                 print("Error in sensapex poll thread:")
                 sys.excepthook(*sys.exc_info())
                 time.sleep(1)
+
+
+def ipv4_addr_at(pkt, offset):
+    return ".".join(str(pkt[i]) for i in range(offset, offset + 4))
+
+
+class PacketCaptureThread(threading.Thread):
+    """
+    Keeps a buffer of the last 30s of network traffic on the UM interface
+    """
+
+    def __init__(self, ump: UMP):
+        super().__init__(daemon=True)
+        self.ump = ump
+        self._ump_address = ump.broadcast_address
+        self._should_stop = False
+        self._buffer = []
+        self._dloff = 0
+
+    def get_recent_captured_packets(self):
+        return [
+            {
+                "time": timestamp,
+                "data": packet,
+                "source": ipv4_addr_at(packet, self._dloff + 12),
+                "destination": ipv4_addr_at(packet, self._dloff + 16),
+            }
+            for timestamp, packet in self._buffer
+        ]
+
+    def start(self):
+        self._should_stop = False
+        threading.Thread.start(self)
+
+    def stop(self):
+        self._should_stop = True
+
+    def run(self):
+        from pcap import pcap
+
+        sniffer = pcap(promisc=True, timeout_ms=1, immediate=True)
+        sniffer.setnonblock(True)
+        sniffer.setfilter(f"host {self._ump_address}")
+        self._dloff = sniffer.dloff
+        last_cleaning = 0
+        while True:
+            if self._should_stop:
+                break
+            capture = next(sniffer)
+            assert self._dloff == sniffer.dloff
+            if capture is None:
+                time.sleep(1)
+                continue
+            self._buffer.append(capture)
+            now = time.time()
+            if (last_cleaning + 10) < now:
+                self._clear_buffer_older_than(now - 30)
+                last_cleaning = now
+
+    def _clear_buffer_older_than(self, cutoff):
+        i = bisect(self._buffer, (cutoff, None))
+        if i:
+            self._buffer = self._buffer[i:]

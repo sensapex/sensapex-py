@@ -379,7 +379,7 @@ class UMP(object):
     def _ensure_pcap_thread_will_work(self):
         import pcap
 
-        assert pcap is not None
+        pcap.pcap()
         if self.guess_network_interface() is None:
             raise RuntimeError("Cannot guess network interface")
 

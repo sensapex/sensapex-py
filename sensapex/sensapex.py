@@ -23,7 +23,7 @@ from ctypes import (
     c_float,
 )
 from timeit import default_timer
-from typing import Dict
+from typing import Dict, List, Union
 
 import numpy as np
 
@@ -176,9 +176,12 @@ class MoveRequest(object):
                     self._movement_args(max_acceleration, dest4, speed, simultaneous),
                 )
 
-    def _movement_args(self, max_acceleration, pos4, speed, simultaneous):
+    def _movement_args(self, max_acceleration, pos4, speed, simultaneous) -> List[Union[c_int, c_float]]:
         mode = int(bool(simultaneous))  # whether all axes move simultaneously
-        return [c_int(self.dev)] + [c_float(x) for x in pos4] + [c_int(int(x)) for x in speed + [mode] + [max_acceleration]]
+        retval: List[Union[c_int, c_float]] = [c_int(self.dev)]
+        retval += [c_float(x) for x in pos4]
+        retval += [c_int(int(x)) for x in speed + [mode] + [max_acceleration]]
+        return retval
 
     def interrupt(self, reason):
         self.ump.call("um_stop", c_int(self.dev))

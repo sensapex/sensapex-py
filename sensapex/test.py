@@ -3,6 +3,12 @@ import sys
 import time
 
 from sensapex import SensapexDevice, UMP
+from sensapex.sensapex import LIBUM_DEF_BCAST_ADDRESS
+
+
+def _bytes_str(s):
+    return bytes(s, "utf-8")
+
 
 parser = argparse.ArgumentParser(
     description="Test for sensapex devices; prints position and status updates continuously."
@@ -10,11 +16,12 @@ parser = argparse.ArgumentParser(
 parser.add_argument(
     "--library-path", type=str, dest="library_path", default=".", help="Folder containing the umsdk library"
 )
+parser.add_argument("--address", type=_bytes_str, default=LIBUM_DEF_BCAST_ADDRESS, help="Device network address")
 parser.add_argument("--group", type=int, default=0, help="Device group number")
 args = parser.parse_args()
 
 UMP.set_library_path(args.library_path)
-um = UMP.get_ump(group=args.group)
+um = UMP.get_ump(address=args.address, group=args.group)
 devids = um.list_devices()
 devs = {i: SensapexDevice(i) for i in devids}
 

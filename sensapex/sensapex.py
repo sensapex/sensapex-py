@@ -918,5 +918,5 @@ class PacketCaptureThread(threading.Thread):
 
     def _clear_buffer_older_than(self, cutoff):
         i = bisect(self._buffer, (cutoff, None))
-        if i:
+        if i > 0:
             self._buffer = self._buffer[i:]

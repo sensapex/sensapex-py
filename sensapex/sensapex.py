@@ -44,12 +44,12 @@ Z_AXIS = 4
 D_AXIS = 8
 
 # error codes
-LIBUM_NO_ERROR     = (0,)   # No error
-LIBUM_OS_ERROR     = (-1,)  # Operating System level error
-LIBUM_NOT_OPEN     = (-2,)  # Communication socket not open
-LIBUM_TIMEOUT      = (-3,)  # Timeout occurred
-LIBUM_INVALID_ARG  = (-4,)  # Illegal command argument
-LIBUM_INVALID_DEV  = (-5,)  # Illegal Device Id
+LIBUM_NO_ERROR = (0,)  # No error
+LIBUM_OS_ERROR = (-1,)  # Operating System level error
+LIBUM_NOT_OPEN = (-2,)  # Communication socket not open
+LIBUM_TIMEOUT = (-3,)  # Timeout occurred
+LIBUM_INVALID_ARG = (-4,)  # Illegal command argument
+LIBUM_INVALID_DEV = (-5,)  # Illegal Device Id
 LIBUM_INVALID_RESP = (-6,)  # Illegal response received
 
 
@@ -107,6 +107,7 @@ class um_state(Structure):
 class MoveRequest(object):
     """Class for coordinating and tracking moves.
     """
+
     max_retries = 3
 
     def __init__(self, ump, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, retry_threshold=0.4):
@@ -134,11 +135,11 @@ class MoveRequest(object):
         self.start_pos = self._read_position()
         diff = [float(d - c) for d, c in zip(dest4, self.start_pos) if d != float("nan")]
         if linear:
-            dist = max(1., np.linalg.norm(diff))
-            speed = [max(1., speed * abs(d / dist)) for d in diff]
+            dist = max(1.0, np.linalg.norm(diff))
+            speed = [max(1.0, speed * abs(d / dist)) for d in diff]
             speed = speed + [0] * (4 - len(speed))
         else:
-            speed = [max(1., speed)] * 4  # speed < 1 crashes the uMp
+            speed = [max(1.0, speed)] * 4  # speed < 1 crashes the uMp
 
         if max_acceleration == 0 or max_acceleration is None:
             if self.ump.default_max_accelerations[dev] is not None:
@@ -247,6 +248,7 @@ class UMP(object):
     
     All calls except get_ump are thread-safe.
     """
+
     _last_move: Dict[int, MoveRequest]
 
     _lib = None

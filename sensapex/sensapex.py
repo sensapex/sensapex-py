@@ -296,7 +296,7 @@ class UMP(object):
         return cls._um_state
 
     @classmethod
-    def get_ump(cls, address=None, group=None, start_poller=True):
+    def get_ump(cls, address=LIBUM_DEF_BCAST_ADDRESS, group=LIBUM_DEF_GROUP, start_poller=True):
         """Return a singleton UM instance.
         """
         # question: can we have multiple UM instances with different address/group ?
@@ -304,7 +304,8 @@ class UMP(object):
             cls._single = UMP(address=address, group=group, start_poller=start_poller)
         return cls._single
 
-    def __init__(self, address=None, group=None, start_poller=True):
+    def __init__(self, address, group, start_poller=True):
+        self.broadcast_address = address.decode()
         self.lock = threading.RLock()
         if self._single is not None:
             raise Exception("Won't create another UM object. Use get_ump() instead.")
@@ -407,13 +408,11 @@ class UMP(object):
     def set_max_acceleration(self, dev, max_acc):
         self.default_max_accelerations[dev] = max_acc
 
-    def open(self, address=None, group=None):
-        """Open the UM device at the given address.
+    def open(self, address, group):
+        """Open the UM devices at the given address.
         
         The default address "169.254.255.255" should suffice in most situations.
         """
-        address = LIBUM_DEF_BCAST_ADDRESS if address is None else address
-        group = LIBUM_DEF_GROUP if group is None else group
         if self.h is not None:
             raise TypeError("UM is already open.")
         addr = ctypes.create_string_buffer(address)

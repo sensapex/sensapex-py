@@ -56,6 +56,11 @@ Thanks to the following for contributions:
 
 ### Changelog
 
+#### 1.022.0
+
+* Setup bdist_wheel that pre-downloads the SDK
+* Bump SDK version to the latest
+
 #### 1.021.2
 
 * SDK version bump

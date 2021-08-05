@@ -14,7 +14,7 @@ parser = argparse.ArgumentParser(
     description="Test for sensapex devices; prints position and status updates continuously."
 )
 parser.add_argument(
-    "--library-path", type=str, dest="library_path", default=".", help="Folder containing the umsdk library"
+    "--library-path", type=str, dest="library_path", default=None, help="Folder containing the umsdk library"
 )
 parser.add_argument("--address", type=_bytes_str, default=LIBUM_DEF_BCAST_ADDRESS, help="Device network address")
 parser.add_argument("--group", type=int, default=0, help="Device group number")

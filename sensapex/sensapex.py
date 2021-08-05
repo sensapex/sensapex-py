@@ -1,12 +1,4 @@
 import atexit
-import subprocess
-
-import ctypes
-import os
-import platform
-import sys
-import threading
-import time
 from bisect import bisect
 from ctypes import (
     c_int,
@@ -25,13 +17,20 @@ from ctypes import (
     Structure,
     c_float,
 )
+from timeit import default_timer
+
+import ctypes
+import numpy as np
+import os
+import platform
+import subprocess
+import sys
+import threading
+import time
+import yaml
 from ipaddress import IPv4Network
 from socket import AF_INET
-from timeit import default_timer
 from typing import Dict, List, Union
-
-import numpy as np
-import yaml
 
 if sys.platform == "win32":
     DUMPCAP = r"C:\Program Files\Wireshark\dumpcap.exe"
@@ -867,7 +866,10 @@ class PollThread(threading.Thread):
 
 
 def ipv4_addr_at(pkt, offset):
-    return ".".join(str(pkt[i]) for i in range(offset, offset + 4))
+    if offset + 4 <= len(pkt):
+        return ".".join(str(pkt[i]) for i in range(offset, offset + 4))
+    else:
+        return "unknown"
 
 
 class PacketCaptureThread(threading.Thread):

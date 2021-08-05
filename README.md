@@ -8,7 +8,7 @@ abstraction.
 
 `pip install sensapex`
 
-Download [the latest umsdk library](http://dist.sensapex.com/misc/um-sdk/rc/) for your platform.
+Download [the latest umsdk library](http://dist.sensapex.com/misc/um-sdk/latest/) for your platform.
 
 ### Usage
 
@@ -55,6 +55,11 @@ Thanks to the following for contributions:
  * Thomas Braun
 
 ### Changelog
+
+#### 1.022.0
+
+* Setup bdist_wheel that pre-downloads the SDK
+* Bump SDK version to the latest
 
 #### 1.021.2
 

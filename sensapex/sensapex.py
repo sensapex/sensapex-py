@@ -1,4 +1,6 @@
 import atexit
+import subprocess
+
 import ctypes
 import os
 import platform
@@ -30,6 +32,11 @@ from typing import Dict, List, Union
 
 import numpy as np
 import yaml
+
+if sys.platform == "win32":
+    DUMPCAP = r"C:\Program Files\Wireshark\dumpcap.exe"
+else:
+    DUMPCAP = "dumpcap"
 
 SOCKET = c_int
 if sys.platform == "win32" and platform.architecture()[0] == "64bit":
@@ -364,7 +371,7 @@ class UMP(object):
             self._ensure_pcap_thread_will_work()
             self._pcap_thread.start()
             pass
-        else:
+        elif self._pcap_thread.is_alive():
             self._pcap_thread.stop()
 
     def _save_exception(self, ex):
@@ -377,9 +384,9 @@ class UMP(object):
             )
 
     def _ensure_pcap_thread_will_work(self):
-        import pcap
-
-        pcap.pcap()
+        can_dumpcap = subprocess.run([DUMPCAP, "-v"])
+        if can_dumpcap.returncode != 0:
+            raise RuntimeError("dumpcap executable not found")
         if self.guess_network_interface() is None:
             raise RuntimeError("Cannot guess network interface")
 
@@ -895,26 +902,33 @@ class PacketCaptureThread(threading.Thread):
         self._should_stop = True
 
     def run(self):
-        from pcap import pcap
+        import psutil
 
-        sniffer = pcap(promisc=True, timeout_ms=1, immediate=True)
-        sniffer.setnonblock(True)
-        sniffer.setfilter(f"host {self._ump_address}")
-        self._dloff = sniffer.dloff
-        last_cleaning = 0
-        while True:
-            if self._should_stop:
-                break
-            capture = next(sniffer)
-            assert self._dloff == sniffer.dloff
-            if capture is None:
-                time.sleep(1)
-                continue
-            self._buffer.append(capture)
-            now = time.time()
-            if (last_cleaning + 10) < now:
-                self._clear_buffer_older_than(now - 30)
-                last_cleaning = now
+        addr_parts = self._ump_address.split(".")
+        addr_parts[-2] = "0"
+        addr_parts[-1] = "0"
+        netmask = ".".join(addr_parts)
+
+        dumpcap_args = [
+            DUMPCAP,
+            "-w",
+            "-",
+        ]
+        for interface in psutil.net_if_addrs():
+            if "loopback" not in interface.lower(): # and interface != "lo":
+                dumpcap_args += ["-i", interface, "-f", f"net {netmask}/16 and udp"]
+
+        with subprocess.Popen(dumpcap_args, stdout=subprocess.PIPE) as sniffer:
+            last_cleaning = 0
+            while True:
+                if self._should_stop:
+                    break
+                capture = sniffer.stdout.readline()
+                now = time.time()
+                self._buffer.append((now, capture))
+                if (last_cleaning + 10) < now:
+                    self._clear_buffer_older_than(now - 30)
+                    last_cleaning = now
 
     def _clear_buffer_older_than(self, cutoff):
         i = bisect(self._buffer, (cutoff, None))

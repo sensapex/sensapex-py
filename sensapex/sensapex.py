@@ -1,5 +1,4 @@
 import atexit
-from bisect import bisect
 from ctypes import (
     c_int,
     c_uint,
@@ -17,19 +16,19 @@ from ctypes import (
     Structure,
     c_float,
 )
+from pathlib import Path
 from timeit import default_timer
 
 import ctypes
 import numpy as np
 import os
 import platform
+import psutil
 import subprocess
 import sys
 import threading
 import time
-import yaml
-from ipaddress import IPv4Network
-from socket import AF_INET
+from datetime import datetime
 from typing import Dict, List, Union
 
 if sys.platform == "win32":
@@ -262,6 +261,8 @@ class UMP(object):
     All calls except get_ump are thread-safe.
     """
 
+    _pcap_proc: Union[subprocess.Popen, None]
+
     _last_move: Dict[int, MoveRequest]
 
     _lib = None
@@ -330,9 +331,10 @@ class UMP(object):
         self.lib = self.get_lib()
         self.lib.um_errorstr.restype = c_char_p
 
-        self._save_exceptions_with_pcap: bool = False
-        self._exception_save_dir: str = "."
-        self._pcap_thread = PacketCaptureThread(self)
+        self._debug = False
+        self._debug_dir = "sensapex-debug"
+        self._debug_file = None
+        self._pcap_proc = None
 
         min_version = (1, 21)
         min_version_str = "v{:d}.{:d}".format(*min_version)
@@ -363,43 +365,62 @@ class UMP(object):
         if start_poller:
             self.poller.start()
 
-    def set_packet_capture_on_exception(self, enabled: bool, output_dir: str = "."):
-        self._save_exceptions_with_pcap = enabled
-        self._exception_save_dir = output_dir
-        if enabled:
-            self._ensure_pcap_thread_will_work()
-            self._pcap_thread.start()
-            pass
-        elif self._pcap_thread.is_alive():
-            self._pcap_thread.stop()
+    def set_debug_mode(self, enabled: bool) -> None:
+        with self.lock:
+            self._debug = enabled
+            if enabled:
+                self._ensure_debug_can_be_enabled()
+                self._debug_file = open(os.path.join(self._debug_dir, "sensapex-debug.log"), "a")
+                self._write_debug("======== Debug logging enabled =======")
+                self._start_pcap()
+            elif self._pcap_is_running():
+                self._stop_pcap()
+                self._debug_file.close()
 
-    def _save_exception(self, ex):
-        now = time.time()
-        with open(f"sensapex-exception-{now}.yaml", "w") as f:
-            f.write(
-                yaml.dump(
-                    {"exception": ex, "timestamp": now, "packets": self._pcap_thread.get_recent_captured_packets()}
-                )
-            )
+    def _ensure_debug_can_be_enabled(self):
+        Path(self._debug_dir).mkdir(parents=True, exist_ok=True)
+        returncode = subprocess.run([DUMPCAP, "-v"], capture_output=True).returncode
+        if returncode != 0:
+            raise RuntimeError(f"dumpcap executable '{DUMPCAP}' failed with return {returncode}")
 
-    def _ensure_pcap_thread_will_work(self):
-        can_dumpcap = subprocess.run([DUMPCAP, "-v"])
-        if can_dumpcap.returncode != 0:
-            raise RuntimeError("dumpcap executable not found")
-        if self.guess_network_interface() is None:
-            raise RuntimeError("Cannot guess network interface")
+    def _write_debug(self, message):
+        if self._debug:
+            self._debug_file.write(f"[{datetime.now().isoformat()}] {message}\n")
 
-    def guess_network_interface(self):
-        import psutil
+    def create_debug_archive(self) -> str:
+        """Zip up the debug log and all pcap files for distribution to Sensapex."""
+        pass  # TODO
 
-        ipv4_addr = IPv4Network(f"{self.broadcast_address}/32")
-        devs = psutil.net_if_addrs()
-        for name, networks in devs.items():
-            for net in networks:
-                if net.family == AF_INET:
-                    subnet = IPv4Network(f"{net.address}/{net.netmask}", strict=False)
-                    if ipv4_addr.subnet_of(subnet):
-                        return name
+    def _start_pcap(self) -> None:
+        """Start the pcap process"""
+        addr_parts = self.broadcast_address.split(".")
+        addr_parts[-2] = "0"
+        addr_parts[-1] = "0"
+        netmask = ".".join(addr_parts)
+
+        dumpcap_args = [
+            DUMPCAP,
+            "-w",
+            os.path.join(self._debug_dir, f"sensapex-{datetime.now().isoformat()}.pcap"),
+        ]
+        for interface in psutil.net_if_addrs():
+            if "loopback" not in interface.lower() and interface != "lo":
+                dumpcap_args += ["-i", interface, "-f", f"net {netmask}/16 and udp"]
+
+        self._pcap_proc = subprocess.Popen(dumpcap_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _pcap_is_running(self) -> bool:
+        """Whether or not the pcap process is running"""
+        return self._pcap_proc is not None and self._pcap_proc.returncode is None
+
+    def _stop_pcap(self) -> None:
+        """Terminate the pcap process"""
+        if self._pcap_is_running():
+            self._pcap_proc.kill()
+            try:
+                self._pcap_proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                self._pcap_proc.terminate()
 
     def get_device(self, dev_id):
         """
@@ -427,7 +448,7 @@ class UMP(object):
         devarray = (c_int * max_id)()
         r = self.call("um_get_device_list", byref(devarray), c_int(max_id))
         devs = [devarray[i] for i in range(r)]
-
+        self._write_debug(f"device ids: {devs!r}")
         return devs
 
     def axis_count(self, dev):
@@ -443,24 +464,25 @@ class UMP(object):
         self._axis_counts[dev] = count
 
     def call(self, fn, *args):
-        try:
-            with self.lock:
-                if self.h is None:
-                    raise TypeError("UM is not open.")
-                rval = getattr(self.lib, fn)(self.h, *args)
-                if rval < 0:
-                    err = self.lib.um_last_error(self.h)
+        with self.lock:
+            if self.h is None:
+                raise TypeError("UM is not open.")
+            self._write_debug(f"calling SDK {fn} with args {args!r}")
+            rval = getattr(self.lib, fn)(self.h, *args)
+            self._write_debug(f"{fn}({args!r}) -> {rval}")
+            if rval < 0:
+                err = self.lib.um_last_error(self.h)
+                if err == -1:
+                    oserr = self.lib.um_last_os_errno(self.h)
+                    err_msg = f"UM OS Error {oserr:d}: {os.strerror(oserr)}"
+                    self._write_debug(err_msg)
+                    raise UMError(err_msg, None, oserr)
+                else:
                     errstr = self.lib.um_errorstr(err)
-                    if err == -1:
-                        oserr = self.lib.um_last_os_errno(self.h)
-                        raise UMError(f"UM OS Error {oserr:d}: {os.strerror(oserr)}", None, oserr)
-                    else:
-                        raise UMError(f"UM Error {err:d}: {errstr}  From {fn}{args!r}", err, None)
-                return rval
-        except UMError as ex:
-            if self._save_exceptions_with_pcap:
-                self._save_exception(ex)
-            raise
+                    err_msg = f"UM Error {err:d}: {errstr}  From {fn}{args!r}"
+                    self._write_debug(err_msg)
+                    raise UMError(err_msg, err, None)
+            return rval
 
     def set_max_acceleration(self, dev, max_acc):
         self.default_max_accelerations[dev] = max_acc
@@ -486,14 +508,13 @@ class UMP(object):
         if self.poller.is_alive():
             self.poller.stop()
             self.poller.join()
-        if self._pcap_thread.is_alive():
-            self._pcap_thread.stop()
-            self._pcap_thread.join()
         with self.lock:
             self.lib.um_close(self.h)
             self.h = None
+        self.set_debug_mode(False)
 
-    def is_positionable(self, dev_id):
+    @staticmethod
+    def is_positionable(dev_id):
         return dev_id != 30
 
     def get_pos(self, dev, timeout=0):
@@ -510,7 +531,9 @@ class UMP(object):
         self.call("um_get_positions", c_int(dev), timeout, *[byref(x) for x in xyzwe])
 
         n_axes = self.axis_count(dev)
-        return [x.value for x in xyzwe[:n_axes]]
+        positions = [x.value for x in xyzwe[:n_axes]]
+        self._write_debug(f"positions: {positions!r}")
+        return positions
 
     def goto_pos(self, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0):
         """Request the specified device to move to an absolute position (in um).
@@ -578,11 +601,13 @@ class UMP(object):
     def get_pressure(self, dev, channel):
         p = c_float()
         self.call("umc_get_pressure_setting", dev, int(channel), byref(p))
+        self._write_debug(f"pressure setting is {p.value}")
         return p.value
 
     def measure_pressure(self, dev, channel):
         p = c_float()
         self.call("umc_measure_pressure", dev, int(channel), byref(p))
+        self._write_debug(f"pressure measured at {p.value}")
         return p.value
 
     def set_valve(self, dev, channel, value):
@@ -602,6 +627,7 @@ class UMP(object):
     def get_um_param(self, dev, param):
         value = c_int()
         self.call("um_get_param", c_int(dev), c_int(param), *[byref(value)])
+        self._write_debug(f"param {param} has value {value.value}")
         return value
 
     def set_um_param(self, dev, param, value):
@@ -870,69 +896,3 @@ def ipv4_addr_at(pkt, offset):
         return ".".join(str(pkt[i]) for i in range(offset, offset + 4))
     else:
         return "unknown"
-
-
-class PacketCaptureThread(threading.Thread):
-    """
-    Keeps a buffer of the last 30s of network traffic on the UM interface
-    """
-
-    def __init__(self, ump: UMP):
-        super().__init__(daemon=True)
-        self.ump = ump
-        self._ump_address = ump.broadcast_address
-        self._should_stop = False
-        self._buffer = []
-        self._dloff = 0
-
-    def get_recent_captured_packets(self):
-        return [
-            {
-                "time": timestamp,
-                "data": packet,
-                "source": ipv4_addr_at(packet, self._dloff + 12),
-                "destination": ipv4_addr_at(packet, self._dloff + 16),
-            }
-            for timestamp, packet in self._buffer
-        ]
-
-    def start(self):
-        self._should_stop = False
-        threading.Thread.start(self)
-
-    def stop(self):
-        self._should_stop = True
-
-    def run(self):
-        import psutil
-
-        addr_parts = self._ump_address.split(".")
-        addr_parts[-2] = "0"
-        addr_parts[-1] = "0"
-        netmask = ".".join(addr_parts)
-
-        dumpcap_args = [
-            DUMPCAP,
-            "-w",
-            "-",
-        ]
-        for interface in psutil.net_if_addrs():
-            if "loopback" not in interface.lower(): # and interface != "lo":
-                dumpcap_args += ["-i", interface, "-f", f"net {netmask}/16 and udp"]
-
-        with subprocess.Popen(dumpcap_args, stdout=subprocess.PIPE) as sniffer:
-            last_cleaning = 0
-            while True:
-                if self._should_stop:
-                    break
-                capture = sniffer.stdout.readline()
-                now = time.time()
-                self._buffer.append((now, capture))
-                if (last_cleaning + 10) < now:
-                    self._clear_buffer_older_than(now - 30)
-                    last_cleaning = now
-
-    def _clear_buffer_older_than(self, cutoff):
-        i = bisect(self._buffer, (cutoff, None))
-        if i > 0:
-            self._buffer = self._buffer[i:]

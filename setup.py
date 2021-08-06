@@ -21,6 +21,13 @@ class DownloadBinariesAndInstall(install):
                 with zip_file.open("libum.dll") as dll_file:
                     with open(os.path.join(self.install_purelib, "sensapex", "libum.dll"), "wb") as install_target:
                         install_target.write(dll_file.read())
+        req = requests.get("http://dist.sensapex.com/misc/umpcli/umpcli-0_951-beta.zip")
+        if req.status_code == 200:
+            content_file = BytesIO(req.content)
+            with ZipFile(content_file, "r") as zip_file:
+                with zip_file.open("umpcli-0_951-beta.exe") as umpcli_file:
+                    with open(os.path.join(self.install_purelib, "sensapex", "umpcli.exe"), "wb") as install_target:
+                        install_target.write(umpcli_file.read())
 
 
 this_directory = path.abspath(path.dirname(__file__))

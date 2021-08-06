@@ -22,10 +22,7 @@ args = parser.parse_args()
 
 UMP.set_library_path(args.library_path)
 um = UMP.get_ump(address=args.address, group=args.group)
-try:
-    um.set_packet_capture_on_exception(True)
-except (ImportError, RuntimeError, OSError) as ex:
-    print(f"packet capture cannot be enabled: {ex}")
+um.set_debug_mode(True)
 devids = um.list_devices()
 devs = {i: SensapexDevice(i) for i in devids}
 

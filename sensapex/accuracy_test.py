@@ -5,14 +5,17 @@ import time
 import numpy as np
 import pyqtgraph as pg
 from sensapex import UMP
+from sensapex.sensapex import LIBUM_DEF_BCAST_ADDRESS
+from sensapex.test import _bytes_str
 
 parser = argparse.ArgumentParser(
     description="Test for sensapex devices; perform a series of random moves while rapidly polling the device position and state."
 )
 parser.add_argument("device", type=int, help="Device ID to test")
 parser.add_argument(
-    "--library-path", type=str, dest="library_path", default=".", help="Folder containing the umsdk library"
+    "--library-path", type=str, dest="library_path", default=None, help="Folder containing the umsdk library"
 )
+parser.add_argument("--address", type=_bytes_str, default=LIBUM_DEF_BCAST_ADDRESS, help="Device network address")
 parser.add_argument("--group", type=int, default=0, help="Device group number")
 parser.add_argument(
     "--x", action="store_true", default=False, dest="x", help="True = Random X axis values. False = keep start position"
@@ -54,7 +57,8 @@ parser.add_argument(
 args = parser.parse_args()
 
 UMP.set_library_path(args.library_path)
-ump = UMP.get_ump(group=args.group)
+ump = UMP.get_ump(address=args.address, group=args.group)
+ump.set_debug_mode(True)
 time.sleep(2)
 devids = ump.list_devices()
 devs = {i: ump.get_device(i) for i in devids}

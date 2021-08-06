@@ -1,3 +1,4 @@
+from __future__ import annotations
 import atexit
 from ctypes import (
     c_int,
@@ -307,7 +308,7 @@ class UMP(object):
         return cls._um_state
 
     @classmethod
-    def get_ump(cls, address=LIBUM_DEF_BCAST_ADDRESS, group=LIBUM_DEF_GROUP, start_poller=True):
+    def get_ump(cls, address=LIBUM_DEF_BCAST_ADDRESS, group=LIBUM_DEF_GROUP, start_poller=True) -> UMP:
         """Return a singleton UM instance.
         """
         # question: can we have multiple UM instances with different address/group ?
@@ -401,7 +402,7 @@ class UMP(object):
         dumpcap_args = [
             DUMPCAP,
             "-w",
-            os.path.join(self._debug_dir, f"sensapex-{datetime.now().isoformat()}.pcap"),
+            os.path.join(os.getcwd(), self._debug_dir, f"sensapex-{datetime.now().isoformat()}.pcap"),
         ]
         for interface in psutil.net_if_addrs():
             if "loopback" not in interface.lower() and interface != "lo":

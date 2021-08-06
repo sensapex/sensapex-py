@@ -336,6 +336,7 @@ class UMP(object):
         self._debug_dir = "sensapex-debug"
         self._debug_file = None
         self._pcap_proc = None
+        self._dev_ids_seen = set()
 
         min_version = (1, 21)
         min_version_str = "v{:d}.{:d}".format(*min_version)
@@ -384,9 +385,13 @@ class UMP(object):
         if returncode != 0:
             raise RuntimeError(f"dumpcap executable '{DUMPCAP}' failed with return {returncode}")
 
-    def _write_debug(self, message):
+    def _write_debug(self, message: str, error: bool = False):
         if self._debug:
             self._debug_file.write(f"[{datetime.now().isoformat()}] {message}\n")
+            if error:
+                # TODO log pingability of devices (how do we know ip addresses?)
+                # TODO get crashlog from devices
+                pass
 
     def create_debug_archive(self) -> str:
         """Zip up the debug log and all pcap files for distribution to Sensapex."""
@@ -412,7 +417,7 @@ class UMP(object):
 
     def _pcap_is_running(self) -> bool:
         """Whether or not the pcap process is running"""
-        return self._pcap_proc is not None and self._pcap_proc.returncode is None
+        return self._pcap_proc is not None and self._pcap_proc.poll() is None
 
     def _stop_pcap(self) -> None:
         """Terminate the pcap process"""
@@ -423,7 +428,7 @@ class UMP(object):
             except subprocess.TimeoutExpired:
                 self._pcap_proc.terminate()
 
-    def get_device(self, dev_id):
+    def get_device(self, dev_id) -> SensapexDevice:
         """
 
         Returns
@@ -435,6 +440,7 @@ class UMP(object):
             if dev_id not in all_devs:
                 raise Exception(f"Invalid sensapex device ID {dev_id}. Options are: {all_devs!r}")
             self.devices[dev_id] = SensapexDevice(dev_id)
+            self.track_device_ids(dev_id)
         return self.devices[dev_id]
 
     def sdk_version(self):
@@ -450,6 +456,7 @@ class UMP(object):
         r = self.call("um_get_device_list", byref(devarray), c_int(max_id))
         devs = [devarray[i] for i in range(r)]
         self._write_debug(f"device ids: {devs!r}")
+        self.track_device_ids(*devs)
         return devs
 
     def axis_count(self, dev):
@@ -476,12 +483,12 @@ class UMP(object):
                 if err == -1:
                     oserr = self.lib.um_last_os_errno(self.h)
                     err_msg = f"UM OS Error {oserr:d}: {os.strerror(oserr)}"
-                    self._write_debug(err_msg)
+                    self._write_debug(err_msg, error=True)
                     raise UMError(err_msg, None, oserr)
                 else:
                     errstr = self.lib.um_errorstr(err)
                     err_msg = f"UM Error {err:d}: {errstr}  From {fn}{args!r}"
-                    self._write_debug(err_msg)
+                    self._write_debug(err_msg, error=True)
                     raise UMError(err_msg, err, None)
             return rval
 
@@ -690,6 +697,18 @@ class UMP(object):
                     self._last_move.pop(dev)
                     move.finish()
 
+    def track_device_ids(self, *dev_ids):
+        for dev in dev_ids:
+            self._dev_ids_seen.add(dev)
+            if self._debug:
+                version = self.get_firmware_version(dev)
+                self._write_debug(f"device[{dev}] noticed. firmware version {version!r}")
+
+    def get_firmware_version(self, dev_id):
+        size = 100
+        version = (c_int * size)()
+        self.call("um_read_version", c_int(dev_id), byref(version), c_int(size))
+        return tuple([v.value for v in version])
 
 class SensapexDevice(object):
     """UM wrapper for accessing a single sensapex device.

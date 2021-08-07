@@ -404,10 +404,11 @@ class UMP(object):
         addr_parts[-1] = "0"
         netmask = ".".join(addr_parts)
 
+        now = "".join(datetime.now().isoformat().split(":"))
         dumpcap_args = [
             DUMPCAP,
             "-w",
-            os.path.join(os.getcwd(), self._debug_dir, f"sensapex-{datetime.now().isoformat()}.pcap"),
+            os.path.join(os.getcwd(), self._debug_dir, f"sensapex-{now}.pcap"),
         ]
         for interface in psutil.net_if_addrs():
             if "loopback" not in interface.lower() and interface != "lo":

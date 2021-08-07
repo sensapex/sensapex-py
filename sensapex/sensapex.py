@@ -705,10 +705,10 @@ class UMP(object):
                 self._write_debug(f"device[{dev}] noticed. firmware version {version!r}")
 
     def get_firmware_version(self, dev_id):
-        size = 100
+        size = 10
         version = (c_int * size)()
         self.call("um_read_version", c_int(dev_id), byref(version), c_int(size))
-        return tuple([v.value for v in version])
+        return tuple([v for v in version])
 
 class SensapexDevice(object):
     """UM wrapper for accessing a single sensapex device.

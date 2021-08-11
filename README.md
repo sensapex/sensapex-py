@@ -1,14 +1,15 @@
 # Sensapex SDK
 
-This python library wraps the C SDK provided by Sensapex's umsdk. It provides
-general access to the functions present therein, as well as a device-based
-abstraction.
+This python library wraps the C SDK provided by Sensapex's umsdk. It provides general access to the
+functions present therein, as well as a device-based abstraction.
 
 ### Installation
 
 `pip install sensapex`
 
-Download [the latest umsdk library](http://dist.sensapex.com/misc/um-sdk/latest/) for your platform.
+This library comes packaged
+with [the latest umsdk library](http://dist.sensapex.com/misc/um-sdk/latest/) for windows. All other
+versions can be downloaded and/or compiled separately and configured with `UMP.set_library_path`.
 
 ### Usage
 
@@ -22,14 +23,13 @@ stage = ump.get_device(20)
 stage.calibrate_zero_position()
 
 manipulator = ump.get_device(4)
-manipulator.goto_pos((-2500.0412, 6810.0003, 15830.1419), speed=2)
+manipulator.goto_pos((2500.0412, 6810.0003, 15830.1419), speed=200)
 
 pressure = ump.get_device(30)
 pressure.set_pressure(1, 2.3e-4)
 ```
 
-Also included are some simple sanity checks. The following will report on all 
-devices present:
+Also included are some simple test scripts. The following will report on all devices present:
 
 ```bash
 python -m sensapex.test
@@ -45,10 +45,16 @@ python -m sensapex.accuracy_test $STAGE_DEVID
 
 #### Debug
 
-You can turn on debugging to produce in-depth logs and network packet captures. First,
-install [Wireshark](https://www.wireshark.org/download.html) (or for linux, use your
-package manager to get the `pcaputils` package). Make sure the user account you use
-has permission to run the `dumpcap` program.
+You can turn on debugging to produce detailed logs and network packet captures. First,
+install [Wireshark](https://www.wireshark.org/download.html) (or for linux, use your package manager
+to get the `pcaputils` package). Make sure the user account you use has permission to run
+the `dumpcap` program. Next, install the psutil python package:
+
+```bash
+pip install psutil
+```
+
+Once those are installed, you can turn on the debug logging for your SDK wrapper:
 
 ```python
 from sensapex import UMP
@@ -57,13 +63,15 @@ ump = UMP.get_ump()
 ump.set_debug_mode(True)
 ```
 
-This will create a directory, `sensapex-debug/` in the current working directory,
-populated with a log file and at least one pcap file. These can be sent to
-[Sensapex](mailto:support@sensapex.com) along with details of the problem, such as:
+This will create a directory, `sensapex-debug/` in the current working directory, populated with a
+log file and a pcap file. Repeated initializations of the debug mode will create addition pcap files
+and append to the log file. These can be sent to
+[Sensapex](mailto:support@sensapex.com) along with any relevant details, such as:
 
- * A description of the errant behavior
- * The color of each of the relevant device lights
- * Steps to reproduce and how consistently it occurs
+* A description of errant behavior
+* The color of each of the relevant device lights
+* A picture of the touchscreen state
+* Steps to reproduce and how consistently it occurs
 
 ### Authorship
 
@@ -71,11 +79,16 @@ Copyright (c) 2016-2021 Luke Campagnola
 
 Thanks to the following for contributions:
 
- * Ari Salmi
- * Martin Chase
- * Thomas Braun
+* Ari Salmi
+* Martin Chase
+* Thomas Braun
 
 ### Changelog
+
+#### 1.022.1
+
+* Debug mode: logs, hardward details and PCAP
+* Bugfix in default library path for test scripts
 
 #### 1.022.0
 

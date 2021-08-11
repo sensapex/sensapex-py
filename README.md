@@ -15,11 +15,10 @@ Download [the latest umsdk library](http://dist.sensapex.com/misc/um-sdk/latest/
 ```python
 from sensapex import UMP
 
-UMP.set_library_path("/path/which/contains/umsdk/binary/for/your/platform/")
 ump = UMP.get_ump()
-ump.list_devices()
+dev_ids = ump.list_devices()
 
-stage = ump.get_device(1)
+stage = ump.get_device(20)
 stage.calibrate_zero_position()
 
 manipulator = ump.get_device(4)
@@ -40,13 +39,35 @@ Or for a more involved test of your hardware as it moves around randomly,
 install [pyqtgraph](https://pyqtgraph.org) in your environment and use e.g.:
 
 ```bash
-STAGE_DEVID=1
+STAGE_DEVID=20
 python -m sensapex.accuracy_test $STAGE_DEVID
 ```
 
+#### Debug
+
+You can turn on debugging to produce in-depth logs and network packet captures. First,
+install [Wireshark](https://www.wireshark.org/download.html) (or for linux, use your
+package manager to get the `pcaputils` package). Make sure the user account you use
+has permission to run the `dumpcap` program.
+
+```python
+from sensapex import UMP
+
+ump = UMP.get_ump()
+ump.set_debug_mode(True)
+```
+
+This will create a directory, `sensapex-debug/` in the current working directory,
+populated with a log file and at least one pcap file. These can be sent to
+[Sensapex](mailto:support@sensapex.com) along with details of the problem, such as:
+
+ * A description of the errant behavior
+ * The color of each of the relevant device lights
+ * Steps to reproduce and how consistently it occurs
+
 ### Authorship
 
-Copyright (c) 2016-2020 Luke Campagnola
+Copyright (c) 2016-2021 Luke Campagnola
 
 Thanks to the following for contributions:
 

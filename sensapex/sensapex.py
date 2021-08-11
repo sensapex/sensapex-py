@@ -17,6 +17,7 @@ from ctypes import (
     Structure,
     c_float,
 )
+import ipaddress
 from pathlib import Path
 from timeit import default_timer
 
@@ -45,6 +46,7 @@ LIBUM_MAX_MANIPULATORS = 254
 LIBUM_MAX_LOG_LINE_LENGTH = 256
 LIBUM_DEF_TIMEOUT = 20
 LIBUM_DEF_BCAST_ADDRESS = b"169.254.255.255"
+LIBUM_DEVICE_SUBNET = "169.254.48.0/24"
 LIBUM_DEF_GROUP = 0
 LIBUM_MAX_MESSAGE_SIZE = 1502
 LIBUM_ARG_UNDEF = float("nan")
@@ -248,6 +250,33 @@ class UMError(Exception):
         self.oserrno = oserrno
 
 
+def _host_is_alive(host: str, timeout: int = 1) -> bool:
+    packet_count_param = "-n" if platform.system().lower() == "windows" else "-c"
+    command = ["ping", packet_count_param, "1", str(host)]
+
+    try:
+        return subprocess.call(command, timeout=timeout) == 0
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def _scan_host_list(hosts):
+    # TODO 10ish threads at a time?
+    return [host for host in hosts if _host_is_alive(host)]
+
+
+def _scan_subnet(subnet: str = LIBUM_DEVICE_SUBNET) -> List[str]:
+    """Ping-scan a subnet and return a list of the hosts that respond
+
+    Parameters
+    ----------
+    subnet
+        An ipv4 subnet in CIDR notation, e.g. `169.254.48.0/24`.
+    """
+    all_valid_hosts = map(str, ipaddress.IPv4Network(subnet))
+    return _scan_host_list(all_valid_hosts)
+
+
 _timer_offset = time.time() - default_timer()
 
 
@@ -337,6 +366,7 @@ class UMP(object):
         self._debug_file = None
         self._pcap_proc = None
         self._dev_ids_seen = set()
+        self._responsive_hosts = None
 
         min_version = (1, 21)
         min_version_str = "v{:d}.{:d}".format(*min_version)
@@ -374,7 +404,6 @@ class UMP(object):
                 self._debug = True
                 self._debug_file = open(os.path.join(self._debug_dir, "sensapex-debug.log"), "a")
                 self._write_debug("======== Debug logging enabled =======")
-                self._write_debug(f"SDK version {self.sdk_version()}")
                 self._start_pcap()
             else:
                 self._debug = False
@@ -383,6 +412,11 @@ class UMP(object):
                 if self._debug_file is not None:
                     self._debug_file.close()
                     self._debug_file = None
+        if self._debug:
+            self._write_debug(f"SDK version {self.sdk_version()}")
+            # TODO put this in a thread:
+            self._responsive_hosts = _scan_subnet(LIBUM_DEVICE_SUBNET)
+            self._write_debug(f"ping scan of subnet {LIBUM_DEVICE_SUBNET}: {self._responsive_hosts}")
 
     def _ensure_debug_can_be_enabled(self):
         try:

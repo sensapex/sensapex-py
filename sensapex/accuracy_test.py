@@ -58,7 +58,10 @@ args = parser.parse_args()
 
 UMP.set_library_path(args.library_path)
 ump = UMP.get_ump(address=args.address, group=args.group)
-ump.set_debug_mode(True)
+try:
+    ump.set_debug_mode(True)
+except RuntimeError as e:
+    print(f"Could not enable Sensapex debug mode: {e}")
 time.sleep(2)
 devids = ump.list_devices()
 devs = {i: ump.get_device(i) for i in devids}

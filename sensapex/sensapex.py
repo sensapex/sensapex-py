@@ -369,21 +369,32 @@ class UMP(object):
 
     def set_debug_mode(self, enabled: bool) -> None:
         with self.lock:
-            self._debug = enabled
             if enabled:
                 self._ensure_debug_can_be_enabled()
+                self._debug = True
                 self._debug_file = open(os.path.join(self._debug_dir, "sensapex-debug.log"), "a")
                 self._write_debug("======== Debug logging enabled =======")
+                self._write_debug(f"SDK version {self.sdk_version()}")
                 self._start_pcap()
-            elif self._pcap_is_running():
-                self._stop_pcap()
-                self._debug_file.close()
+            else:
+                self._debug = False
+                if self._pcap_is_running():
+                    self._stop_pcap()
+                if self._debug_file is not None:
+                    self._debug_file.close()
+                    self._debug_file = None
 
     def _ensure_debug_can_be_enabled(self):
-        Path(self._debug_dir).mkdir(parents=True, exist_ok=True)
-        returncode = subprocess.run([DUMPCAP, "-v"], capture_output=True).returncode
-        if returncode != 0:
-            raise RuntimeError(f"dumpcap executable '{DUMPCAP}' failed with return {returncode}")
+        try:
+            Path(self._debug_dir).mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            raise RuntimeError(f"user does not have permission to create debug directory {self._debug_dir}")
+        try:
+            returncode = subprocess.run([DUMPCAP, "-v"], capture_output=True).returncode
+            if returncode != 0:
+                raise RuntimeError(f"dumpcap executable '{DUMPCAP}' failed with return {returncode}")
+        except PermissionError:
+            raise RuntimeError(f"user does not have permission to use dumpcap executable '{DUMPCAP}'")
 
     def _write_debug(self, message: str, error: bool = False):
         if self._debug:

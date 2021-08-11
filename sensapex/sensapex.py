@@ -421,9 +421,10 @@ class UMP(object):
             "-w",
             os.path.join(os.getcwd(), self._debug_dir, f"sensapex-{now}.pcap"),
         ]
-        for interface in psutil.net_if_addrs():
+        for interface, addrs in psutil.net_if_addrs().items():
             if "loopback" not in interface.lower() and interface != "lo":
                 dumpcap_args += ["-i", interface, "-f", f"net {netmask}/16 and udp"]
+                self._write_debug(f"Found network interface {interface} with addresses {addrs!r}")
 
         self._pcap_proc = subprocess.Popen(dumpcap_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -725,6 +726,7 @@ class UMP(object):
         version = (c_int * size)()
         self.call("um_read_version", c_int(dev_id), byref(version), c_int(size))
         return tuple([v for v in version])
+
 
 class SensapexDevice(object):
     """UM wrapper for accessing a single sensapex device.

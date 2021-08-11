@@ -421,13 +421,17 @@ class UMP(object):
         return self._pcap_proc is not None and self._pcap_proc.poll() is None
 
     def _stop_pcap(self) -> None:
-        """Terminate the pcap process"""
+        """Gently terminate the pcap process"""
         if self._pcap_is_running():
-            self._pcap_proc.kill()
             try:
                 self._pcap_proc.wait(timeout=1)
             except subprocess.TimeoutExpired:
-                self._pcap_proc.terminate()
+                self._pcap_proc.kill()
+                if self._pcap_is_running():
+                    try:
+                        self._pcap_proc.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        self._pcap_proc.terminate()
 
     def get_device(self, dev_id) -> SensapexDevice:
         """

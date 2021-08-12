@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import atexit
 from ctypes import (
     c_int,
@@ -17,9 +18,9 @@ from ctypes import (
     Structure,
     c_float,
 )
-import ipaddress
-from pathlib import Path
+from ipaddress import IPv4Network
 from timeit import default_timer
+from traceback import format_exception
 
 import ctypes
 import numpy as np
@@ -31,7 +32,10 @@ import sys
 import threading
 import time
 from datetime import datetime
-from typing import Dict, List, Union
+from pathlib import Path
+from typing import Dict, List, Union, Iterable
+
+from sensapex.utils import PingThread
 
 if sys.platform == "win32":
     DUMPCAP = r"C:\Program Files\Wireshark\dumpcap.exe"
@@ -250,33 +254,6 @@ class UMError(Exception):
         self.oserrno = oserrno
 
 
-def _host_is_alive(host: str, timeout: int = 1) -> bool:
-    packet_count_param = "-n" if platform.system().lower() == "windows" else "-c"
-    command = ["ping", packet_count_param, "1", str(host)]
-
-    try:
-        return subprocess.call(command, timeout=timeout) == 0
-    except subprocess.TimeoutExpired:
-        return False
-
-
-def _scan_host_list(hosts):
-    # TODO 10ish threads at a time?
-    return [host for host in hosts if _host_is_alive(host)]
-
-
-def _scan_subnet(subnet: str = LIBUM_DEVICE_SUBNET) -> List[str]:
-    """Ping-scan a subnet and return a list of the hosts that respond
-
-    Parameters
-    ----------
-    subnet
-        An ipv4 subnet in CIDR notation, e.g. `169.254.48.0/24`.
-    """
-    all_valid_hosts = map(str, ipaddress.IPv4Network(subnet))
-    return _scan_host_list(all_valid_hosts)
-
-
 _timer_offset = time.time() - default_timer()
 
 
@@ -366,7 +343,7 @@ class UMP(object):
         self._debug_file = None
         self._pcap_proc = None
         self._dev_ids_seen = set()
-        self._responsive_hosts = None
+        self._responsive_hosts = set()
 
         min_version = (1, 21)
         min_version_str = "v{:d}.{:d}".format(*min_version)
@@ -396,6 +373,7 @@ class UMP(object):
         self.poller = PollThread(self)
         if start_poller:
             self.poller.start()
+        self._ping_scanner = None
 
     def set_debug_mode(self, enabled: bool) -> None:
         with self.lock:
@@ -405,8 +383,12 @@ class UMP(object):
                 self._debug_file = open(os.path.join(self._debug_dir, "sensapex-debug.log"), "a")
                 self._write_debug("======== Debug logging enabled =======")
                 self._start_pcap()
+                self._ping_scanner = PingThread(map(str, IPv4Network(LIBUM_DEVICE_SUBNET)), self.track_ip_addrs)
+                self._ping_scanner.start()
             else:
                 self._debug = False
+                if self._ping_scanner.is_alive():
+                    self._ping_scanner.stop()
                 if self._pcap_is_running():
                     self._stop_pcap()
                 if self._debug_file is not None:
@@ -414,9 +396,6 @@ class UMP(object):
                     self._debug_file = None
         if self._debug:
             self._write_debug(f"SDK version {self.sdk_version()}")
-            # TODO put this in a thread:
-            self._responsive_hosts = _scan_subnet(LIBUM_DEVICE_SUBNET)
-            self._write_debug(f"ping scan of subnet {LIBUM_DEVICE_SUBNET}: {self._responsive_hosts}")
 
     def _ensure_debug_can_be_enabled(self):
         try:
@@ -430,13 +409,15 @@ class UMP(object):
         except PermissionError:
             raise RuntimeError(f"user does not have permission to use dumpcap executable '{DUMPCAP}'")
 
-    def _write_debug(self, message: str, error: bool = False):
+    def _write_debug(self, message: str, error: Union[Exception, None] = None):
         if self._debug:
             self._debug_file.write(f"[{datetime.now().isoformat()}] {message}\n")
-            if error:
-                # TODO log pingability of devices (how do we know ip addresses?)
-                # TODO get crashlog from devices
-                pass
+            if error is not None:
+                exc_info = (type(error), error, error.__traceback__)
+                self._debug_file.write("E: ".join(format_exception(*exc_info)))
+                if self._debug and not self._ping_scanner.is_alive():
+                    self._ping_scanner = PingThread(self._responsive_hosts, self._log_ping_scan)
+                # TODO get crashlog from devices (sdk does not yet provide)
 
     def create_debug_archive(self) -> str:
         """Zip up the debug log and all pcap files for distribution to Sensapex."""
@@ -534,13 +515,13 @@ class UMP(object):
                 if err == -1:
                     oserr = self.lib.um_last_os_errno(self.h)
                     err_msg = f"UM OS Error {oserr:d}: {os.strerror(oserr)}"
-                    self._write_debug(err_msg, error=True)
-                    raise UMError(err_msg, None, oserr)
+                    exc = UMError(err_msg, None, oserr)
                 else:
                     errstr = self.lib.um_errorstr(err)
                     err_msg = f"UM Error {err:d}: {errstr}  From {fn}{args!r}"
-                    self._write_debug(err_msg, error=True)
-                    raise UMError(err_msg, err, None)
+                    exc = UMError(err_msg, err, None)
+                self._write_debug(err_msg, error=exc)
+                raise exc
             return rval
 
     def set_max_acceleration(self, dev, max_acc):
@@ -567,6 +548,9 @@ class UMP(object):
         if self.poller.is_alive():
             self.poller.stop()
             self.poller.join()
+        if self._ping_scanner.is_alive():
+            self._ping_scanner.stop()
+            self._ping_scanner.join()
         with self.lock:
             self.lib.um_close(self.h)
             self.h = None
@@ -754,6 +738,15 @@ class UMP(object):
             if self._debug:
                 version = self.get_firmware_version(dev)
                 self._write_debug(f"device[{dev}] noticed. firmware version {version!r}")
+
+    def track_ip_addrs(self, addresses: Iterable[str]):
+        self._responsive_hosts = self._responsive_hosts | set(addresses)
+        self._write_debug(f"Noticed addresses in the device subnet: {addresses!r}")
+
+    def _log_ping_scan(self, addresses: Iterable[str]):
+        missing = self._responsive_hosts - set(addresses)
+        if len(missing) > 0:
+            self._write_debug(f"Ping scan could net reach {missing!r}")
 
     def get_firmware_version(self, dev_id):
         size = 10
@@ -961,10 +954,3 @@ class PollThread(threading.Thread):
                 print("Error in sensapex poll thread:")
                 sys.excepthook(*sys.exc_info())
                 time.sleep(1)
-
-
-def ipv4_addr_at(pkt, offset):
-    if offset + 4 <= len(pkt):
-        return ".".join(str(pkt[i]) for i in range(offset, offset + 4))
-    else:
-        return "unknown"

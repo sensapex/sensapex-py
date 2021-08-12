@@ -18,9 +18,8 @@ from ctypes import (
     Structure,
     c_float,
 )
-from ipaddress import IPv4Network
 from timeit import default_timer
-from traceback import format_exception
+from traceback import format_stack
 
 import ctypes
 import numpy as np
@@ -32,6 +31,7 @@ import sys
 import threading
 import time
 from datetime import datetime
+from ipaddress import IPv4Network
 from pathlib import Path
 from typing import Dict, List, Union, Iterable
 
@@ -413,8 +413,7 @@ class UMP(object):
         if self._debug:
             self._debug_file.write(f"[{datetime.now().isoformat()}] {message}\n")
             if error is not None:
-                exc_info = (type(error), error, error.__traceback__)
-                self._debug_file.write("E: ".join(format_exception(*exc_info)))
+                self._debug_file.write("".join(format_stack(limit=-2)))
                 if self._debug and not self._ping_scanner.is_alive():
                     self._ping_scanner = PingThread(self._responsive_hosts, self._log_ping_scan)
                 # TODO get crashlog from devices (sdk does not yet provide)

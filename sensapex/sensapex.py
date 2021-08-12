@@ -35,7 +35,7 @@ from ipaddress import IPv4Network
 from pathlib import Path
 from typing import Dict, List, Union, Iterable
 
-from sensapex.utils import PingThread
+from sensapex.utils import ScanThread
 
 if sys.platform == "win32":
     DUMPCAP = r"C:\Program Files\Wireshark\dumpcap.exe"
@@ -383,12 +383,15 @@ class UMP(object):
                 self._debug_file = open(os.path.join(self._debug_dir, "sensapex-debug.log"), "a")
                 self._write_debug("======== Debug logging enabled =======")
                 self._start_pcap()
-                self._ping_scanner = PingThread(map(str, IPv4Network(LIBUM_DEVICE_SUBNET)), self.track_ip_addrs)
-                self._ping_scanner.start()
+                if self._ping_scanner is None:
+                    self._ping_scanner = ScanThread(map(str, IPv4Network(LIBUM_DEVICE_SUBNET)), self.track_ip_addrs)
+                    self._ping_scanner.start()
             else:
                 self._debug = False
-                if self._ping_scanner.is_alive():
+                if self._ping_scanner is not None and self._ping_scanner.is_alive():
                     self._ping_scanner.stop()
+                    self._ping_scanner.join()
+                    self._ping_scanner = None
                 if self._pcap_is_running():
                     self._stop_pcap()
                 if self._debug_file is not None:
@@ -415,7 +418,7 @@ class UMP(object):
             if error is not None:
                 self._debug_file.write("".join(format_stack(limit=-2)))
                 if self._debug and not self._ping_scanner.is_alive():
-                    self._ping_scanner = PingThread(self._responsive_hosts, self._log_ping_scan)
+                    self._ping_scanner = ScanThread(self._responsive_hosts, self._log_ping_scan)
                 # TODO get crashlog from devices (sdk does not yet provide)
 
     def create_debug_archive(self) -> str:
@@ -547,9 +550,6 @@ class UMP(object):
         if self.poller.is_alive():
             self.poller.stop()
             self.poller.join()
-        if self._ping_scanner.is_alive():
-            self._ping_scanner.stop()
-            self._ping_scanner.join()
         with self.lock:
             self.lib.um_close(self.h)
             self.h = None

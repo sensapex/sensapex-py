@@ -2,44 +2,60 @@ import platform
 import subprocess
 import threading
 import time
-from types import FunctionType
 from typing import Iterable
 
 packet_count_param = "-n" if platform.system().lower() == "windows" else "-c"
 
 
-# def scan_subnet_trio(subnet: str, timeout: int = 1) -> Set[str]:
-#     return trio.run(_async_scan_subnet_trio, subnet, timeout)
+# class TrioThread(threading.Thread):
+#     def __init__(self, addresses: Iterable[str], on_complete):
+#         self._addresses = addresses
+#         self._on_complete = on_complete
+#         self._stop_called = False
+#         super(TrioThread, self).__init__(daemon=True)
 #
+#     def run(self):
+#         self._on_complete(trio.run(self._async_scan_subnet_trio))
 #
-# async def _async_scan_subnet_trio(subnet: str, timeout: int) -> Set[str]:
-#     responsive = set()
-#     pings_in_progress = 0
+#     def stop(self):
+#         self._stop_called = True
 #
-#     async def do_ping(host: str):
-#         nonlocal pings_in_progress, responsive
-#         command = ["ping", packet_count_param, "1", host]
-#         while pings_in_progress >= 10:
-#             await trio.sleep(0.1)
-#         with trio.move_on_after(timeout):
-#             pings_in_progress += 1
-#             process = await trio.run_process(command, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-#             if process.returncode == 0:
-#                 responsive.add(host)
-#         pings_in_progress -= 1
+#     async def _async_scan_subnet_trio(self) -> Set[str]:
+#         responsive = set()
+#         pings_in_progress = 0
 #
-#     async with trio.open_nursery() as nursery:
-#         [nursery.start_soon(do_ping, str(h)) for h in IPv4Network(subnet)]
+#         async def do_ping(host: str, cancel_scope: trio.CancelScope):
+#             nonlocal pings_in_progress
+#             command = ["ping", packet_count_param, "1", host]
+#             while pings_in_progress >= 10:
+#                 if self._stop_called:
+#                     cancel_scope.cancel()
+#                 await trio.sleep(0.1)
+#             with trio.move_on_after(1):
+#                 pings_in_progress += 1
+#                 process = await trio.run_process(
+#                     command,
+#                     check=False,
+#                     stdout=subprocess.DEVNULL,
+#                     stderr=subprocess.DEVNULL,
+#                 )
+#                 if process.returncode == 0:
+#                     responsive.add(host)
+#             pings_in_progress -= 1
 #
-#     return responsive
+#         async with trio.open_nursery() as nursery:
+#             self._nursery = nursery
+#             [nursery.start_soon(do_ping, h, nursery.cancel_scope) for h in self._addresses]
+#
+#         return responsive
 
 
-class PingThread(threading.Thread):
+class ScanThread(threading.Thread):
     def __init__(self, addresses: Iterable[str], on_complete):
         self._addresses = addresses
         self._on_complete = on_complete
         self._stop_called = False
-        super(PingThread, self).__init__()
+        super(ScanThread, self).__init__(daemon=True)
 
     def stop(self):
         self._stop_called = True
@@ -50,7 +66,7 @@ class PingThread(threading.Thread):
         lock = threading.Lock()
 
         def do_ping(host: str):
-            nonlocal pings_in_progress, responsive
+            nonlocal pings_in_progress
             command = ["ping", packet_count_param, "1", host]
             while pings_in_progress >= 10:
                 if self._stop_called:

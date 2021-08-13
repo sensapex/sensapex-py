@@ -4,6 +4,11 @@ import threading
 import time
 from typing import Iterable
 
+
+def bytes_str(s):
+    return bytes(s, "utf-8")
+
+
 packet_count_param = "-n" if platform.system().lower() == "windows" else "-c"
 
 

@@ -4,26 +4,23 @@ import time
 
 from sensapex import SensapexDevice, UMP
 from sensapex.sensapex import LIBUM_DEF_BCAST_ADDRESS
-
-
-def _bytes_str(s):
-    return bytes(s, "utf-8")
-
+from sensapex.utils import bytes_str
 
 parser = argparse.ArgumentParser(
     description="Test for sensapex devices; prints position and status updates continuously."
 )
 parser.add_argument(
-    "--library-path", type=str, dest="library_path", default=None, help="Folder containing the umsdk library"
+    "--library-path", "-l", type=str, dest="library_path", default=None, help="Folder containing the umsdk library"
 )
-parser.add_argument("--address", type=_bytes_str, default=LIBUM_DEF_BCAST_ADDRESS, help="Device network address")
-parser.add_argument("--group", type=int, default=0, help="Device group number")
+parser.add_argument("--address", "-a", type=bytes_str, default=LIBUM_DEF_BCAST_ADDRESS, help="Device network address")
+parser.add_argument("--group", "-g", type=int, default=0, help="Device group number")
+parser.add_argument("--debug", "-d", action="store_true", help="Turn on debug logging")
 args = parser.parse_args()
 
 UMP.set_library_path(args.library_path)
 um = UMP.get_ump(address=args.address, group=args.group)
 try:
-    um.set_debug_mode(True)
+    um.set_debug_mode(args.debug)
 except RuntimeError as e:
     print(f"Could not enable Sensapex debug mode: {e}")
 devids = um.list_devices()

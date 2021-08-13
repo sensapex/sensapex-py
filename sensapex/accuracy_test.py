@@ -6,17 +6,19 @@ import numpy as np
 import pyqtgraph as pg
 from sensapex import UMP
 from sensapex.sensapex import LIBUM_DEF_BCAST_ADDRESS
-from sensapex.test import _bytes_str
+from sensapex.utils import bytes_str
+
 
 parser = argparse.ArgumentParser(
     description="Test for sensapex devices; perform a series of random moves while rapidly polling the device position and state."
 )
 parser.add_argument("device", type=int, help="Device ID to test")
 parser.add_argument(
-    "--library-path", type=str, dest="library_path", default=None, help="Folder containing the umsdk library"
+    "--library-path", "-l", type=str, dest="library_path", default=None, help="Folder containing the umsdk library"
 )
-parser.add_argument("--address", type=_bytes_str, default=LIBUM_DEF_BCAST_ADDRESS, help="Device network address")
-parser.add_argument("--group", type=int, default=0, help="Device group number")
+parser.add_argument("--address", "-a", type=bytes_str, default=LIBUM_DEF_BCAST_ADDRESS, help="Device network address")
+parser.add_argument("--debug", "-d", action="store_true", help="Turn on debug logging")
+parser.add_argument("--group", "-g", type=int, default=0, help="Device group number")
 parser.add_argument(
     "--x", action="store_true", default=False, dest="x", help="True = Random X axis values. False = keep start position"
 )

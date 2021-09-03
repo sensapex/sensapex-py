@@ -340,7 +340,6 @@ class UMP(object):
         self._debug_file = None
         self._pcap_proc = None
         self._dev_ids_seen = set()
-        self._responsive_hosts = set()
 
         min_version = (1, 21)
         min_version_str = "v{:d}.{:d}".format(*min_version)
@@ -725,9 +724,9 @@ class UMP(object):
                 version = self.get_firmware_version(dev)
                 self._write_debug(f"device[{dev}] noticed. firmware version {version!r}")
 
-    def track_ip_addrs(self, addresses: Iterable[str]):
-        self._responsive_hosts = self._responsive_hosts | set(addresses)
-        self._write_debug(f"Noticed addresses in the device subnet: {addresses!r}")
+    # def track_ip_addrs(self, addresses: Iterable[str]):
+    #     self._responsive_hosts = self._responsive_hosts | set(addresses)
+    #     self._write_debug(f"Noticed addresses in the device subnet: {addresses!r}")
 
     # def _log_ping_scan(self, addresses: Iterable[str]):
     #     missing = self._responsive_hosts - set(addresses)

@@ -312,9 +312,13 @@ class UMP(object):
         return cls._um_state
 
     @classmethod
-    def get_ump(cls, address=LIBUM_DEF_BCAST_ADDRESS, group=LIBUM_DEF_GROUP, start_poller=True) -> UMP:
+    def get_ump(cls, address=None, group=None, start_poller=True) -> UMP:
         """Return a singleton UM instance.
         """
+        if address is None:
+            address = LIBUM_DEF_BCAST_ADDRESS
+        if group is None:
+            group = LIBUM_DEF_GROUP
         # question: can we have multiple UM instances with different address/group ?
         if cls._single is None:
             cls._single = UMP(address=address, group=group, start_poller=start_poller)

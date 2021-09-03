@@ -273,6 +273,7 @@ class UMP(object):
     _lib_path = None
     _single = None
     _um_state = None
+    _debug_at_cls = False
 
     @classmethod
     def set_library_path(cls, path):
@@ -335,11 +336,12 @@ class UMP(object):
         self.lib = self.get_lib()
         self.lib.um_errorstr.restype = c_char_p
 
-        self._debug = False
+        self._debug = self._debug_at_cls
         self._debug_dir = "sensapex-debug"
         self._debug_file = None
         self._pcap_proc = None
         self._dev_ids_seen = set()
+        self._set_debug_mode(self._debug)
 
         min_version = (1, 21)
         min_version_str = "v{:d}.{:d}".format(*min_version)
@@ -370,7 +372,13 @@ class UMP(object):
         if start_poller:
             self.poller.start()
 
-    def set_debug_mode(self, enabled: bool) -> None:
+    @classmethod
+    def set_debug_mode(cls, enabled: bool) -> None:
+        cls._debug_at_cls = enabled
+        if cls._single is not None:
+            cls._single._set_debug_mode(enabled)
+
+    def _set_debug_mode(self, enabled: bool) -> None:
         with self.lock:
             if enabled:
                 self._ensure_debug_can_be_enabled()

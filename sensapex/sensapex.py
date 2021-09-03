@@ -1,6 +1,13 @@
 from __future__ import annotations
 
 import atexit
+import ctypes
+import os
+import platform
+import subprocess
+import sys
+import threading
+import time
 from ctypes import (
     c_int,
     c_uint,
@@ -18,24 +25,14 @@ from ctypes import (
     Structure,
     c_float,
 )
+from datetime import datetime
+from pathlib import Path
 from timeit import default_timer
 from traceback import format_stack
-
-import ctypes
-import numpy as np
-import os
-import platform
-import psutil
-import subprocess
-import sys
-import threading
-import time
-from datetime import datetime
-from ipaddress import IPv4Network
-from pathlib import Path
 from typing import Dict, List, Union, Iterable
 
-from sensapex.utils import ScanThread
+import numpy as np
+import psutil
 
 if sys.platform == "win32":
     DUMPCAP = r"C:\Program Files\Wireshark\dumpcap.exe"
@@ -50,7 +47,7 @@ LIBUM_MAX_MANIPULATORS = 254
 LIBUM_MAX_LOG_LINE_LENGTH = 256
 LIBUM_DEF_TIMEOUT = 20
 LIBUM_DEF_BCAST_ADDRESS = b"169.254.255.255"
-LIBUM_DEVICE_SUBNET = "169.254.48.0/24"
+LIBUM_DEVICE_SUBNET = "169.254.0.0/16"
 LIBUM_DEF_GROUP = 0
 LIBUM_MAX_MESSAGE_SIZE = 1502
 LIBUM_ARG_UNDEF = float("nan")
@@ -373,7 +370,6 @@ class UMP(object):
         self.poller = PollThread(self)
         if start_poller:
             self.poller.start()
-        self._ping_scanner = None
 
     def set_debug_mode(self, enabled: bool) -> None:
         with self.lock:
@@ -383,15 +379,8 @@ class UMP(object):
                 self._debug_file = open(os.path.join(self._debug_dir, "sensapex-debug.log"), "a")
                 self._write_debug("======== Debug logging enabled =======")
                 self._start_pcap()
-                if self._ping_scanner is None:
-                    self._ping_scanner = ScanThread(map(str, IPv4Network(LIBUM_DEVICE_SUBNET)), self.track_ip_addrs)
-                    self._ping_scanner.start()
             else:
                 self._debug = False
-                if self._ping_scanner is not None and self._ping_scanner.is_alive():
-                    self._ping_scanner.stop()
-                    self._ping_scanner.join()
-                    self._ping_scanner = None
                 if self._pcap_is_running():
                     self._stop_pcap()
                 if self._debug_file is not None:
@@ -417,8 +406,6 @@ class UMP(object):
             self._debug_file.write(f"[{datetime.now().isoformat()}] {message}\n")
             if error is not None:
                 self._debug_file.write("".join(format_stack()[:-2]))
-                if self._debug and not self._ping_scanner.is_alive():
-                    self._ping_scanner = ScanThread(self._responsive_hosts, self._log_ping_scan)
                 # TODO get crashlog from devices (sdk does not yet provide)
 
     def create_debug_archive(self) -> str:
@@ -430,7 +417,7 @@ class UMP(object):
         addr_parts = self.broadcast_address.split(".")
         addr_parts[-2] = "0"
         addr_parts[-1] = "0"
-        netmask = ".".join(addr_parts)
+        masked_net = ".".join(addr_parts)
 
         now = "".join(datetime.now().isoformat().split(":"))
         dumpcap_args = [
@@ -440,7 +427,7 @@ class UMP(object):
         ]
         for interface, addrs in psutil.net_if_addrs().items():
             if "loopback" not in interface.lower() and interface != "lo":
-                dumpcap_args += ["-i", interface, "-f", f"net {netmask}/16 and udp"]
+                dumpcap_args += ["-i", interface, "-f", f"net {masked_net}/16 and udp"]
                 self._write_debug(f"Found network interface {interface} with addresses {addrs!r}")
 
         self._pcap_proc = subprocess.Popen(dumpcap_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -742,10 +729,10 @@ class UMP(object):
         self._responsive_hosts = self._responsive_hosts | set(addresses)
         self._write_debug(f"Noticed addresses in the device subnet: {addresses!r}")
 
-    def _log_ping_scan(self, addresses: Iterable[str]):
-        missing = self._responsive_hosts - set(addresses)
-        if len(missing) > 0:
-            self._write_debug(f"Ping scan could net reach {missing!r}")
+    # def _log_ping_scan(self, addresses: Iterable[str]):
+    #     missing = self._responsive_hosts - set(addresses)
+    #     if len(missing) > 0:
+    #         self._write_debug(f"Ping scan could net reach {missing!r}")
 
     def get_firmware_version(self, dev_id):
         size = 10

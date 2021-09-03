@@ -59,8 +59,8 @@ Once those are installed, you can turn on the debug logging for your SDK wrapper
 ```python
 from sensapex import UMP
 
+UMP.set_debug_mode(True)
 ump = UMP.get_ump()
-ump.set_debug_mode(True)
 ```
 
 This will create a directory, `sensapex-debug/` in the current working directory, populated with a
@@ -87,7 +87,7 @@ Thanks to the following for contributions:
 
 #### 1.022.1
 
-* Debug mode: logs, hardward details and PCAP
+* Debug mode: logs, hardware details and PCAP
 * Bugfix in default library path for test scripts
 
 #### 1.022.0

@@ -77,10 +77,11 @@ and append to the log file. These can be sent to
 
 ### Authorship
 
-Copyright (c) 2016-2021 Luke Campagnola
+Copyright (c) 2016-2021 Sensapex Oy
 
 Thanks to the following for contributions:
 
+* Luke Campagnola
 * Ari Salmi
 * Martin Chase
 * Thomas Braun

@@ -39,9 +39,11 @@ Or for a more involved test of your hardware as it moves around randomly,
 install [pyqtgraph](https://pyqtgraph.org) in your environment and use e.g.:
 
 ```bash
-STAGE_DEVID=20
-python -m sensapex.accuracy_test $STAGE_DEVID
+python -m sensapex.accuracy_test <device_id>
 ```
+
+Where `<device_id>` should be replaced with the numerical ID of your device, as shown by `python -m sensapex.test`.
+
 
 #### Debug
 

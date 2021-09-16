@@ -1,10 +1,9 @@
 import os
 
 from io import BytesIO
-
+import platform
 from zipfile import ZipFile
-
-import requests
+import urllib.request
 from distutils.command.install import install
 from os import path
 
@@ -14,20 +13,23 @@ from setuptools import setup, find_packages
 class DownloadBinariesAndInstall(install):
     def run(self):
         super(DownloadBinariesAndInstall, self).run()
-        req = requests.get("http://dist.sensapex.com/misc/um-sdk/latest/umsdk-1.022-binaries.zip")
-        if req.status_code == 200:
-            content_file = BytesIO(req.content)
-            with ZipFile(content_file, "r") as zip_file:
-                with zip_file.open("libum.dll") as dll_file:
-                    with open(os.path.join(self.install_purelib, "sensapex", "libum.dll"), "wb") as install_target:
-                        install_target.write(dll_file.read())
-        req = requests.get("http://dist.sensapex.com/misc/umpcli/umpcli-0_951-beta.zip")
-        if req.status_code == 200:
-            content_file = BytesIO(req.content)
-            with ZipFile(content_file, "r") as zip_file:
-                with zip_file.open("umpcli-0_951-beta.exe") as umpcli_file:
-                    with open(os.path.join(self.install_purelib, "sensapex", "umpcli.exe"), "wb") as install_target:
-                        install_target.write(umpcli_file.read())
+        if platform.system() == 'Windows':
+            dll_data = self.download_from_zip('http://dist.sensapex.com/misc/um-sdk/latest/umsdk-1.022-binaries.zip', ["libum.dll"])[0]
+            with open(os.path.join(self.install_purelib, "sensapex", "libum.dll"), "wb") as install_target:
+                install_target.write(dll_data)
+            umpcli_data = self.download_from_zip('http://dist.sensapex.com/misc/umpcli/umpcli-0_951-beta.zip', ["umpcli-0_951-beta.exe"])[0]
+            with open(os.path.join(self.install_purelib, "sensapex", "umpcli.exe"), "wb") as install_target:
+                install_target.write(umpcli_data)
+
+    def download_from_zip(self, url, files):
+        req = urllib.request.urlopen(url)
+        content_file = BytesIO(req.read())
+        data = []
+        with ZipFile(content_file, "r") as zip_file:
+            for fname in files:
+                with zip_file.open(fname) as req_file:
+                    data.append(req_file.read())
+        return data
 
 
 this_directory = path.abspath(path.dirname(__file__))

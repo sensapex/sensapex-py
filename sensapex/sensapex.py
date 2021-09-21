@@ -240,8 +240,10 @@ class MoveRequest(object):
         return self._next_move_index < len(self._moves)
 
     def make_next_call(self):
-        self.ump.call("um_goto_position_ext", *self._moves[self._next_move_index])
-        self._next_move_index += 1
+        try:
+            self.ump.call("um_goto_position_ext", *self._moves[self._next_move_index])
+        finally:
+            self._next_move_index += 1
 
 
 class UMError(Exception):
@@ -673,6 +675,18 @@ class UMP(object):
     def set_um_param(self, dev, param, value):
         return self.call("um_set_param", c_int(dev), c_int(param), value)
 
+    def run_um_cmd(self, dev_id, cmd, *args):
+        argv = (c_int * len(args))()
+        for i,x in enumerate(args):
+            argv[i] = x
+        self.call('um_cmd', c_int(dev_id), c_int(cmd), c_int(len(args)), byref(argv))
+
+    def restart_device(self, dev_id):
+        self.run_um_cmd(dev_id, 3)
+
+    def set_device_group(self, dev_id, group):
+        self.set_um_param(dev_id, 6, 55555 + group)
+
     def calibrate_zero_position(self, dev):
         self.call("um_init_zero", dev, X_AXIS | Y_AXIS | Z_AXIS | D_AXIS)
 
@@ -746,10 +760,20 @@ class UMP(object):
     #         self._write_debug(f"Ping scan could net reach {missing!r}")
 
     def get_firmware_version(self, dev_id):
-        size = 10
-        version = (c_int * size)()
+        """Return the firmware version installed on a device.
+        """
+        version = (c_int * 5)()
         self.call("um_read_version", c_int(dev_id), byref(version), c_int(size))
-        return tuple([v for v in version])
+        return tuple(version)
+
+    def ping_device(self, dev_id):
+        """Ping a device. 
+
+        Returns after ping is received, or raises an exception on timeout.
+        """
+        self.call('um_ping', c_int(dev_id))
+
+
 
 
 class SensapexDevice(object):

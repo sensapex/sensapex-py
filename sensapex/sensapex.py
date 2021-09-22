@@ -272,8 +272,9 @@ class UMP(object):
 
     _last_move: Dict[int, MoveRequest]
 
-    _lib = None
     _lib_path = None
+    _libum = None
+    libuma = None
     _single = None
     _um_state = None
     _debug_at_cls = False
@@ -294,29 +295,29 @@ class UMP(object):
 
     @classmethod
     def get_lib(cls):
-        if cls._lib is None:
-            cls._lib = cls.load_lib()
-            cls._lib.um_get_version.restype = c_char_p
-        return cls._lib
+        if cls._libum is None:
+            cls._libum = cls.load_lib("libum")
+            cls._libum.um_get_version.restype = c_char_p
+        return cls._libum
 
     @classmethod
-    def load_lib(cls):
+    def load_lib(cls, libname="libum"):
         path = os.path.abspath(os.path.dirname(__file__))
         if sys.platform == "win32":
             if cls._lib_path is not None:
-                return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, "libum"))
+                return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, libname))
 
             try:
-                return ctypes.windll.libum
+                return getattr(ctypes.windll, libname)
             except OSError:
                 pass
 
-            return ctypes.windll.LoadLibrary(os.path.join(path, "libum"))
+            return ctypes.windll.LoadLibrary(os.path.join(path, libname))
         else:
             if cls._lib_path is not None:
-                return ctypes.cdll.LoadLibrary(os.path.join(cls._lib_path, "libum.so"))
+                return ctypes.cdll.LoadLibrary(os.path.join(cls._lib_path, f"{libname}.so"))
 
-            return ctypes.cdll.LoadLibrary(os.path.join(path, "libum.so"))
+            return ctypes.cdll.LoadLibrary(os.path.join(path, f"{libname}.so"))
 
     @classmethod
     def get_um_state_class(cls):
@@ -350,8 +351,9 @@ class UMP(object):
         self._retry_threshold = 0.4
         self.default_max_accelerations = {}
 
-        self.lib = self.get_lib()
+        self.lib = self.load_lib("libum")
         self.lib.um_errorstr.restype = c_char_p
+        self.libuma = self.load_lib("libuma")
 
         self._debug = self._debug_at_cls
         self._debug_dir = "sensapex-debug"
@@ -404,7 +406,7 @@ class UMP(object):
                 self._ensure_debug_can_be_enabled()
                 self._debug = True
                 self._debug_file = open(os.path.join(self._debug_dir, "sensapex-debug.log"), "a")
-                self._write_debug("======== Debug logging enabled =======")
+                self.write_debug("======== Debug logging enabled =======")
                 self._start_pcap()
             else:
                 self._debug = False
@@ -414,7 +416,7 @@ class UMP(object):
                     self._debug_file.close()
                     self._debug_file = None
         if self._debug:
-            self._write_debug(f"SDK version {self.sdk_version()}")
+            self.write_debug(f"SDK version {self.sdk_version()}")
 
     def _ensure_debug_can_be_enabled(self):
         try:
@@ -428,7 +430,7 @@ class UMP(object):
         except PermissionError:
             raise RuntimeError(f"user does not have permission to use dumpcap executable '{DUMPCAP}'")
 
-    def _write_debug(self, message: str, error: Union[Exception, None] = None):
+    def write_debug(self, message: str, error: Union[Exception, None] = None):
         if self._debug:
             self._debug_file.write(f"[{datetime.now().isoformat()}] {message}\n")
             if error is not None:
@@ -457,7 +459,7 @@ class UMP(object):
         for interface, addrs in psutil.net_if_addrs().items():
             if "loopback" not in interface.lower() and interface != "lo":
                 dumpcap_args += ["-i", interface, "-f", f"net {masked_net}/16 and udp"]
-                self._write_debug(f"Found network interface {interface} with addresses {addrs!r}")
+                self.write_debug(f"Found network interface {interface} with addresses {addrs!r}")
 
         self._pcap_proc = subprocess.Popen(dumpcap_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -505,7 +507,7 @@ class UMP(object):
         devarray = (c_int * max_id)()
         r = self.call("um_get_device_list", byref(devarray), c_int(max_id))
         devs = [devarray[i] for i in range(r)]
-        self._write_debug(f"device ids: {devs!r}")
+        self.write_debug(f"device ids: {devs!r}")
         self.track_device_ids(*devs)
         return devs
 
@@ -522,15 +524,18 @@ class UMP(object):
         self._axis_counts[dev] = count
 
     def call(self, fn, *args):
+        return self.call_lib_fn(self.lib, fn, self.h, *args)
+
+    def call_lib_fn(self, lib, fn, *args):
         with self.lock:
             if self.h is None:
                 raise TypeError("UM is not open.")
-            self._write_debug(f"calling SDK {fn} with args {args!r}")
-            rval = getattr(self.lib, fn)(self.h, *args)
-            self._write_debug(f"{fn}({args!r}) -> {rval}")
+            self.write_debug(f"calling SDK {fn} with args {args!r}")
+            rval = getattr(lib, fn)(*args)
+            self.write_debug(f"{fn}({args!r}) -> {rval}")
             if rval < 0:
                 err = self.lib.um_last_error(self.h)
-                if err == -1:
+                if err == LIBUM_OS_ERROR:
                     oserr = self.lib.um_last_os_errno(self.h)
                     err_msg = f"UM OS Error {oserr:d}: {os.strerror(oserr)}"
                     exc = UMError(err_msg, None, oserr)
@@ -538,9 +543,31 @@ class UMP(object):
                     errstr = self.lib.um_errorstr(err)
                     err_msg = f"UM Error {err:d}: {errstr}  From {fn}{args!r}"
                     exc = UMError(err_msg, err, None)
-                self._write_debug(err_msg, error=exc)
+                self.write_debug(err_msg, error=exc)
                 raise exc
             return rval
+
+    def call_uma_fn(self, fn_name: str, uma_state: Structure, *args):
+        fn_name = f"uma_{fn_name}"
+        fn = getattr(self.libuma, f"uma_{fn_name}")
+
+        with self.lock:
+            self.write_debug(f"calling SDK {fn} with args {args!r}")
+            retval = fn(byref(uma_state), *args)
+            self.write_debug(f"{fn}({args!r}) -> {retval}")
+            if retval >= LIBUM_NO_ERROR:
+                return retval
+            err = self.lib.um_last_error(self.h)
+            if retval == LIBUM_OS_ERROR:
+                oserr = self.lib.um_last_os_errno(self.h)
+                err_msg = f"UM OS Error {oserr:d}: {os.strerror(oserr)}"
+                exc = UMError(err_msg, None, oserr)
+            else:  # all other errors
+                errstr = self.lib.um_errorstr(err)
+                err_msg = f"UM Error {err:d}: {errstr}  From {fn}{args!r}"
+                exc = UMError(err_msg, err, None)
+            self.write_debug(err_msg, error=exc)
+            raise exc
 
     def set_max_acceleration(self, dev, max_acc):
         self.default_max_accelerations[dev] = max_acc
@@ -590,7 +617,7 @@ class UMP(object):
 
         n_axes = self.axis_count(dev)
         positions = [x.value for x in xyzwe[:n_axes]]
-        self._write_debug(f"positions: {positions!r}")
+        self.write_debug(f"positions: {positions!r}")
         return positions
 
     def goto_pos(self, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0):
@@ -659,13 +686,13 @@ class UMP(object):
     def get_pressure(self, dev, channel):
         p = c_float()
         self.call("umc_get_pressure_setting", dev, int(channel), byref(p))
-        self._write_debug(f"pressure setting is {p.value}")
+        self.write_debug(f"pressure setting is {p.value}")
         return p.value
 
     def measure_pressure(self, dev, channel):
         p = c_float()
         self.call("umc_measure_pressure", dev, int(channel), byref(p))
-        self._write_debug(f"pressure measured at {p.value}")
+        self.write_debug(f"pressure measured at {p.value}")
         return p.value
 
     def set_valve(self, dev, channel, value):
@@ -685,7 +712,7 @@ class UMP(object):
     def get_um_param(self, dev, param):
         value = c_int()
         self.call("um_get_param", c_int(dev), c_int(param), *[byref(value)])
-        self._write_debug(f"param {param} has value {value.value}")
+        self.write_debug(f"param {param} has value {value.value}")
         return value
 
     def set_um_param(self, dev, param, value):
@@ -764,7 +791,7 @@ class UMP(object):
             self._dev_ids_seen.add(dev)
             if self._debug:
                 version = self.get_firmware_version(dev)
-                self._write_debug(f"device[{dev}] noticed. firmware version {version!r}")
+                self.write_debug(f"device[{dev}] noticed. firmware version {version!r}")
 
     # def track_ip_addrs(self, addresses: Iterable[str]):
     #     self._responsive_hosts = self._responsive_hosts | set(addresses)

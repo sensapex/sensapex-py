@@ -29,7 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from timeit import default_timer
 from traceback import format_stack
-from typing import Dict, List, Union, Iterable
+from typing import Dict, List, Union
 
 import numpy as np
 import psutil
@@ -276,10 +276,20 @@ class UMP(object):
     _single = None
     _um_state = None
     _debug_at_cls = False
+    _default_group = LIBUM_DEF_GROUP
+    _default_address = LIBUM_DEF_BCAST_ADDRESS
 
     @classmethod
     def set_library_path(cls, path):
         cls._lib_path = path
+
+    @classmethod
+    def set_default_address(cls, address):
+        cls._default_address = address
+
+    @classmethod
+    def set_default_group(cls, group):
+        cls._default_group = group
 
     @classmethod
     def get_lib(cls):
@@ -318,9 +328,9 @@ class UMP(object):
         """Return a singleton UM instance.
         """
         if address is None:
-            address = LIBUM_DEF_BCAST_ADDRESS
+            address = cls._default_address
         if group is None:
-            group = LIBUM_DEF_GROUP
+            group = cls._default_group
         # question: can we have multiple UM instances with different address/group ?
         if cls._single is None:
             cls._single = UMP(address=address, group=group, start_poller=start_poller)
@@ -772,8 +782,6 @@ class UMP(object):
         Returns after ping is received, or raises an exception on timeout.
         """
         self.call('um_ping', c_int(dev_id))
-
-
 
 
 class SensapexDevice(object):

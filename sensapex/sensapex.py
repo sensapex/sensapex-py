@@ -779,7 +779,7 @@ class UMP(object):
         """Return the firmware version installed on a device.
         """
         version = (c_int * 5)()
-        self.call("um_read_version", c_int(dev_id), byref(version), c_int(size))
+        self.call("um_read_version", c_int(dev_id), byref(version), c_int(5))
         return tuple(version)
 
     def ping_device(self, dev_id):

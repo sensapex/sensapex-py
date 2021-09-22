@@ -32,7 +32,6 @@ from traceback import format_stack
 from typing import Dict, List, Union
 
 import numpy as np
-import psutil
 
 if sys.platform == "win32":
     DUMPCAP = r"C:\Program Files\Wireshark\dumpcap.exe"
@@ -57,13 +56,13 @@ Z_AXIS = 4
 D_AXIS = 8
 
 # error codes
-LIBUM_NO_ERROR = (0,)  # No error
-LIBUM_OS_ERROR = (-1,)  # Operating System level error
-LIBUM_NOT_OPEN = (-2,)  # Communication socket not open
-LIBUM_TIMEOUT = (-3,)  # Timeout occurred
-LIBUM_INVALID_ARG = (-4,)  # Illegal command argument
-LIBUM_INVALID_DEV = (-5,)  # Illegal Device Id
-LIBUM_INVALID_RESP = (-6,)  # Illegal response received
+LIBUM_NO_ERROR = 0  # No error
+LIBUM_OS_ERROR = -1  # Operating System level error
+LIBUM_NOT_OPEN = -2  # Communication socket not open
+LIBUM_TIMEOUT = -3  # Timeout occurred
+LIBUM_INVALID_ARG = -4  # Illegal command argument
+LIBUM_INVALID_DEV = -5  # Illegal Device Id
+LIBUM_INVALID_RESP = -6  # Illegal response received
 
 
 class sockaddr_in(Structure):
@@ -150,7 +149,7 @@ class MoveRequest(object):
         if linear:
             dist = max(1.0, np.linalg.norm(diff))
             speed = [max(1.0, speed * abs(d / dist)) for d in diff]
-            speed = speed + [0] * (4 - len(speed))
+            speed += [0] * (4 - len(speed))
         else:
             speed = [max(1.0, speed)] * 4  # speed < 1 crashes the uMp
 
@@ -228,6 +227,8 @@ class MoveRequest(object):
     def is_close_enough(self):
         pos = self._read_position()
         target = np.array(self.target_pos).astype(float)
+        if pos.shape != target.shape:
+            raise ValueError("Is your device configured for the correct number of axes?", None, None)
         err = np.abs(pos - target)
         mask = np.isfinite(err)
         return np.all(err[mask] < self._retry_threshold[: len(mask)][mask])
@@ -280,7 +281,7 @@ class UMP(object):
     _default_address = LIBUM_DEF_BCAST_ADDRESS
 
     @classmethod
-    def set_library_path(cls, path):
+    def set_library_path(cls, path: str):
         cls._lib_path = path
 
     @classmethod
@@ -388,6 +389,9 @@ class UMP(object):
         if start_poller:
             self.poller.start()
 
+    def set_timeout(self, value: int):
+        self.h.timeout = c_int(value)
+
     @classmethod
     def set_debug_mode(cls, enabled: bool) -> None:
         cls._debug_at_cls = enabled
@@ -437,6 +441,8 @@ class UMP(object):
 
     def _start_pcap(self) -> None:
         """Start the pcap process"""
+        import psutil
+
         addr_parts = self.broadcast_address.split(".")
         addr_parts[-2] = "0"
         addr_parts[-1] = "0"

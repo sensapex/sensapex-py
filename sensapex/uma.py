@@ -3,6 +3,7 @@ import atexit
 import faulthandler
 
 import time
+from contextlib import contextmanager
 from ctypes import (
     byref,
     c_uint32,
@@ -17,8 +18,10 @@ from ctypes import (
     c_float,
 )
 from threading import Thread
+from typing import Union
 
 import numpy as np
+from typing_extensions import Literal
 
 import pyqtgraph as pg
 from sensapex import SensapexDevice, UMError
@@ -64,25 +67,23 @@ class UMA(object):
         self.call("init", sensapex_connection.h, c_int(uMp.dev_id))
         # `init` sets the following:
         self._sample_rate = 9776
-        self._current_range = 200e-12
+        self._current_input_range = 200e-12
         self._clamp_mode = "VC"
-        self._compensations_by_mode = {
-            "VC": {
-                "cslow_enabled": False,
-                "cslow_gain": None,  # TODO what is this actually?
-                "cslow_tau": None,  # TODO what is this actually?
-                "serial_resistance_enabled": False,
-                "serial_resistance_gain": None,  # TODO what is this actually?
-                "serial_resistance_tau": None,  # TODO what is this actually?
-                "serial_resistance_range": None,  # TODO what is this actually?
-                "serial_resistance_lag_filter": None,  # TODO what is this actually?
+        self._compensations = {
+            "cslow": {
+                "enabled": False,
+                "gain": None,  # TODO what is this actually?
+                "tau": None,  # TODO what is this actually?
             },
-            "IC": {
-                "cfast_enabled": False,
-                "cfast_gain": None,  # TODO what is this actually?
-                "bridge_enabled": False,
-                "bridge_gain": None,  # TODO what is this actually?
+            "serial_resistance": {
+                "enabled": False,
+                "gain": None,  # TODO what is this actually?
+                "tau": None,  # TODO what is this actually?
+                "range": None,  # TODO what is this actually?
+                "lag_filter": None,  # TODO what is this actually?
             },
+            "cfast": {"enabled": False, "gain": None,},  # TODO what is this actually?
+            "bridge": {"enabled": False, "gain": None,},  # TODO what is this actually?
         }
         # TODO how do we track the following initial states: no reset, no RUN, no ZAP
         # TODO wouldn't it be better to ask for these values from the sdk?
@@ -107,7 +108,7 @@ class UMA(object):
 
     def call(self, fn_name: str, *args) -> int:
         """
-        Make a raw call to the C API.
+        Make a raw call to a uMa function in the C API.
 
         Parameters
         ----------
@@ -138,8 +139,8 @@ class UMA(object):
         ----------
         stimulus : ndarray
             Up to 749 points of stimulus, which will be cast to 32-bit integers. The scaling depends on the clamp mode.
-            For VC, TODO.
-            For IC, current_range and TODO.
+            For VC, only the bottom 9 bits are usable, not including sign. Values are scaled to ±700mV.
+            For IC, only the bottom 17 bits are usable, not including sign. Values are scaled to ±`current_input_range`.
         trigger_sync : bool
             TODO what does this end up doing?
         """
@@ -149,80 +150,116 @@ class UMA(object):
         if stim_len > 749:
             raise ValueError(f"Stimulus must have 749 or fewer points. Received {stim_len}.")
         # TODO check for clipping?
-        # TODO do we need to convert to the non binary-offset, 13- or 10-bit format? hopefully not.
         stimulus = stimulus.astype(c_int)
         c_stimulus = np.ctypeslib.as_ctypes(stimulus)
         self.call("stimulus", c_int(stim_len), c_stimulus, c_bool(trigger_sync))
 
-    def set_clamp_mode(self, mode: str) -> None:
+    def set_clamp_mode(self, mode: Union[Literal["VC"], Literal["IC"]]) -> None:
         """
-        Enable either IC or VC mode.
+        Enable either current (IC) or voltage (VC) clamp mode.
 
-        This will automatically disable all incompatible compensation circuits, and re-enable any compensations that
-        were previously on.
+        This will disable all incompatible compensation circuits, and re-enable any compensations that were previously
+        enabled.
 
         Parameters
         ----------
-        mode: str
-            Either "IC" or "VC".
+        mode
+            Either "IC" for current clamp or "VC" for voltage clamp.
         """
         if mode == self._clamp_mode:
             return
+        self._clamp_mode = mode
         if mode == "IC":
-            # TODO swap out compensation circuits if needed
-            self.call("set_current_clamp_mode", c_bool(True))
-            self._clamp_mode = mode
+            self._enable_vc_mode()
         elif mode == "VC":
-            # TODO swap out compensation circuits if needed
-            self.call("set_current_clamp_mode", c_bool(False))
-            self._clamp_mode = mode
+            self._enable_ic_mode()
         else:
             raise ValueError(f"'{mode}' is not a valid clamp mode. Only 'VC' and 'IC' are accepted.")
 
-    VALID_SAMPLE_RATES = (1221, 4883, 9776, 19531, 50000)
+    def _enable_ic_mode(self):
+        self.set_cfast(enabled=False)
+        self.set_bridge(enabled=False)
+        self.set_cslow(**self._compensations["cslow"])
+        self.set_serial_resistance(**self._compensations["serial_resistance"])
+        self.call("set_current_clamp_mode", c_bool(False))
+
+    def _enable_vc_mode(self):
+        self.set_cslow(enabled=False)
+        self.set_serial_resistance(enabled=False)
+        self.set_cfast(**self._compensations["cfast"])
+        self.set_bridge(**self._compensations["bridge"])
+        self.call("set_current_clamp_mode", c_bool(True))
+
+    VALID_SAMPLE_RATES = (1221, 4883, 9776, 19531, 50000, 100000, 200000)
 
     def set_sample_rate(self, rate: int) -> None:
         if rate not in self.VALID_SAMPLE_RATES:
             raise ValueError(f"'{rate}' is an invalid sample rate. Choose from {self.VALID_SAMPLE_RATES}.")
-        self.call("set_sample_rate", c_int(rate))
-        self._sample_rate = rate
+        with self.pause_receiving():
+            self._sample_rate = rate
+            self.call("set_sample_rate", c_int(rate))
 
-    VALID_CURRENT_RANGES = (200e-12, 2000e-12, 20000e-12, 200000e-12)
+    VALID_CURRENT_INPUT_RANGES = (200e-12, 2000e-12, 20000e-12, 200000e-12)
 
-    def set_current_range(self, current_range: float) -> None:
+    def set_current_input_range(self, current_range: float) -> None:
         """
-        Sets the input/output range of current values. ( Note that no similar method exists for the voltage range, which
-        is always ±700mV. )
+        Sets the input range of current values. ( Note that no similar method exists for the voltage range, which is
+        always ±700mV. )
 
         Parameters
         ----------
         current_range : float
-            One of the VALID_CURRENT_RANGES (200pA, 2nA, 20nA or 200nA). All current input and output will then be
-            scaled to ± this value.
+            One of the VALID_CURRENT_RANGES (200pA, 2nA, 20nA or 200nA). All current input will then be scaled to ± this
+            value.
         """
-        if current_range not in self.VALID_CURRENT_RANGES:
+        if current_range not in self.VALID_CURRENT_INPUT_RANGES:
             raise ValueError(
-                f"'{current_range}' is not a valid current range. Choose from {self.VALID_CURRENT_RANGES}."
+                f"'{current_range}' is not a valid current range. Choose from {self.VALID_CURRENT_INPUT_RANGES}."
             )
-        self._current_range = current_range
-        self.call("set_range", c_int(int(current_range / 1e-12)))  # Convert to int pA first
+        with self.pause_receiving():
+            self._current_input_range = current_range
+            self.call("set_range", c_int(int(current_range / 1e-12)))  # Convert to int pA first
 
-    def set_cslow(self, enabled: bool, gain: float, tau: float) -> None:
+    VALID_CURRENT_OUTPUT_RANGES = (3.75e-9, 150e-9)
+
+    def set_current_output_range(self, current_range: float):
+        if current_range not in self.VALID_CURRENT_OUTPUT_RANGES:
+            raise ValueError(
+                f"'{current_range}' is not a valid current range. Choose from {self.VALID_CURRENT_OUTPUT_RANGES}."
+            )
+        self.call("enable_cc_higher_range", c_bool(current_range == 3.75e-9))
+
+    def zap(self, duration=None):
+        with self.pause_receiving():
+            self.call("set_zap", c_bool(True))
+        if duration is not None:
+            time.sleep(duration)
+            with self.pause_receiving():
+                self.call("set_zap", c_bool(False))
+
+    def set_cslow(self, enabled: bool = None, gain: float = None, tau: float = None) -> None:
         if enabled and self._clamp_mode != "VC":
             raise ValueError("cslow compensation cannot be enabled in IC mode")
         # TODO
 
-    def set_cfast(self, enabled: bool, gain: float) -> None:
+    def set_cfast(self, enabled: bool = None, gain: float = None) -> None:
         if enabled and self._clamp_mode != "IC":
             raise ValueError("cfast compensation cannot be enabled in VC mode")
         # TODO
 
-    def set_serial_resistance(self, enabled: bool, gain: float, tau: float, _range: float, lag_filter: bool) -> None:
+    def set_serial_resistance(
+        self,
+        enabled: bool = None,
+        gain: float = None,
+        prediction_rise_factor: int = None,  # 2 or 3
+        tau: float = None,
+        lag_filter: bool = None,
+    ) -> None:
         if enabled and self._clamp_mode != "VC":
             raise ValueError("serial resistance compensation cannot be enabled in IC mode")
         # TODO
 
-    def set_bridge(self, enabled: bool, gain: float):
+    def set_bridge(self, enabled: bool = None, gain: float = None):
         if enabled and self._clamp_mode != "IC":
             raise ValueError("bridge compensation cannot be enabled in VC mode")
         # TODO
@@ -231,7 +268,9 @@ class UMA(object):
         while self._run_recv_thread:
             if self._pause_recv_thread:
                 time.sleep(1)
+                continue
             try:
+                # TODO race? what if this and stop are called at the same time?
                 self.call("recv", self.UMA_CAPTURES_PER_PACKET, self._recv_buffer)
             except UMError as e:
                 if e.errno == LIBUM_TIMEOUT:
@@ -281,6 +320,17 @@ class UMA(object):
         self._run_recv_thread = False
         self._recv_thread.join()
 
+    @contextmanager
+    def pause_receiving(self):
+        was_receiving = self.is_receiving()
+        self.stop_receiving()
+        yield
+        if was_receiving:
+            self.start_receiving()
+
+    def is_receiving(self):
+        return self._run_recv_thread and not self._pause_recv_thread
+
 
 if __name__ == "__main__":
     UMP.set_debug_mode(True)
@@ -307,7 +357,7 @@ if __name__ == "__main__":
     range_of_current = 20000e-12
     read_sample_rate = 9776
 
-    uma.set_current_range(range_of_current)
+    uma.set_current_input_range(range_of_current)
     uma.set_sample_rate(read_sample_rate)
     uma.set_clamp_mode("VC")
 
@@ -320,7 +370,7 @@ if __name__ == "__main__":
     vc_dac = int(2 ** 8 * abs(vc_output) / 0.5) | (0 if vc_output >= 0 else 2 ** 9) | (0 if not trig else 2 ** 11)
     uma.call("set_vc_dac", c_int16(vc_dac))
 
-    uma.call("set_trig_bit", c_bool(trig))
+    uma.call("set_trig_bit", c_bool(trig))  # TODO what does this do?
     uma.call("set_wait_trig", c_bool(False))
 
     # Amplifier correction parameters
@@ -352,7 +402,6 @@ if __name__ == "__main__":
     # Stimulus setup
     N_SAMPLES = 600  # max 749
     np_stimulus = np.zeros((N_SAMPLES,))
-    np_stimulus[0:-20] = 30
 
     w = pg.GraphicsLayoutWidget()
     p1 = w.addPlot(row=0, col=0)
@@ -371,36 +420,36 @@ if __name__ == "__main__":
     )
     t_offset = None
 
-
     def handle_raw_recv(received_data):
         global graph_data, t_offset
         t_offset = received_data["ts"][0] if t_offset is None else t_offset
         graph_data = np.roll(graph_data, -len(received_data))
 
-        graph_data[-len(received_data):]["ts"] = (received_data["ts"] - t_offset) * 1e-6
+        graph_data[-len(received_data) :]["ts"] = (received_data["ts"] - t_offset) * 1e-6
         # ±range_of_current pA w.r.t. ground/common
         # read_data[-len(np_buff):]["current"] = (1e-12 * range_of_current / (2 ** 15)) * np_buff["current"]
-        graph_data[-len(received_data):]["current"] = (range_of_current / (2 ** 15)) * (
-                received_data["current"].astype(int) - 2 ** 15)
+        graph_data[-len(received_data) :]["current"] = (range_of_current / (2 ** 15)) * (
+            received_data["current"].astype(int) - 2 ** 15
+        )
         # ±700 mV w.r.t. ground/common
         # read_data[-len(np_buff):]["voltage"] = np_buff["voltage"] * (0.7 / 2 ** 15)
-        graph_data[-len(received_data):]["voltage"] = (0.7 / 2 ** 15) * (received_data["voltage"].astype(int) - 2 ** 15)
-        graph_data[-len(received_data):]["status"] = received_data["status"]
-
+        graph_data[-len(received_data) :]["voltage"] = (0.7 / 2 ** 15) * (
+            received_data["voltage"].astype(int) - 2 ** 15
+        )
+        graph_data[-len(received_data) :]["status"] = received_data["status"]
 
     def handle_scaled_recv(received_data):
         global graph_data, t_offset
         t_offset = received_data["ts"][0] if t_offset is None else t_offset
         graph_data = np.roll(graph_data, -len(received_data))
 
-        graph_data[-len(received_data):]["ts"] = received_data["ts"] - t_offset
-        graph_data[-len(received_data):]["current"] = received_data["current"]
-        graph_data[-len(received_data):]["voltage"] = received_data["voltage"]
-        graph_data[-len(received_data):]["status"] = received_data["status"]
+        graph_data[-len(received_data) :]["ts"] = received_data["ts"] - t_offset
+        graph_data[-len(received_data) :]["current"] = received_data["current"]
+        graph_data[-len(received_data) :]["voltage"] = received_data["voltage"]
+        graph_data[-len(received_data) :]["status"] = received_data["status"]
 
     uma.add_receive_data_handler_raw(handle_raw_recv)
     uma.start_receiving()
-
 
     def update_plots():
         t = graph_data["ts"]
@@ -408,57 +457,68 @@ if __name__ == "__main__":
         p2.plot(t, graph_data["voltage"], clear=True)
         p3.plot(t, graph_data["status"], clear=True)
 
-
     timer = pg.QtCore.QTimer()
     timer.timeout.connect(update_plots)
     timer.start(10)
 
-
-    def insert_stim():
+    def insert_stim(magnitude=30):
+        global np_stimulus
+        np_stimulus[0:-20] = magnitude
         uma.send_stimulus_raw(np_stimulus, trig)
 
+    def stim_train():
+        def _do_stims():
+            for i in range(18):
+                print(f"stimming at 2**{i}")
+                insert_stim((2 ** i))
+                time.sleep(0.1)
+                print(f"stimming at 2**{i}-1")
+                insert_stim((2 ** i) - 1)
+            time.sleep(0.1)
+            for i in range(18):
+                print(f"stimming at -2**{i}")
+                insert_stim(-(2 ** i))
+                time.sleep(0.1)
+                print(f"stimming at -2**{i} + 1")
+                insert_stim(-(2 ** i) + 1)
+                time.sleep(0.1)
+
+        t = Thread(target=_do_stims, daemon=True)
+        t.start()
 
     stim_timer = pg.QtCore.QTimer()
     stim_timer.timeout.connect(insert_stim)
 
     # stim_timer.start(1000)
 
-
     def cleanup():
         timer.stop()
         stim_timer.stop()
         uma.quit()
 
-
     atexit.register(cleanup)
-
 
     def pause():
         time.sleep(0.1)
         uma.stop_receiving()
 
-
     def unpause():
         uma.start_receiving()
 
-
     def test_stim():
-        # TODO this doesn't work any more. pausing the recording prevents noticing the stim.
-        global timer, stim_timer, graph_data
-        pause()
-        # MC the next uma call will hang
-        start_ts = graph_data["ts"][-1]
-        print(f"latest timestamp on a sample at start stim {start_ts}")
-        insert_stim()
-        print("starting")
-        unpause()
-        print("sleeping")
-        time.sleep(2)
-        local_read_data = graph_data.copy()
-        try:
-            trig_index = np.argwhere(local_read_data["current"] > 20e-12)[0, 0]
-            trig_time = local_read_data[trig_index]["ts"]
-            print(f"Stim detected at t={trig_time}")
-            print(f"time difference: {trig_time - start_ts}")
-        except IndexError:
-            print("Could not detect a current > 20e-12")
+        def _do_test():
+            global timer, stim_timer, graph_data
+            start_ts = graph_data["ts"][-1]
+            print(f"latest timestamp on a sample at start stim {start_ts}")
+            insert_stim(2**9)
+            print("sleeping")
+            time.sleep(2)
+            local_read_data = graph_data.copy()
+            try:
+                trig_index = np.argwhere(local_read_data["current"] > 20e-12)[0, 0]
+                trig_time = local_read_data[trig_index]["ts"]
+                print(f"Stim detected at t={trig_time}")
+                print(f"time difference: {trig_time - start_ts}")
+            except IndexError:
+                print("Could not detect a current > 20e-12")
+        Thread(target=_do_test, daemon=True).start()

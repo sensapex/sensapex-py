@@ -18,7 +18,7 @@ from ctypes import (
     c_float,
 )
 from threading import Thread
-from typing import Union
+from typing import Union, Iterable, Dict
 
 import numpy as np
 from typing_extensions import Literal
@@ -58,35 +58,90 @@ class UMA(object):
 
     UMA_CAPTURES_PER_PACKET = 1440 // sizeof(_uma_capture_struct)
 
-    def __init__(self, sensapex_connection: UMP, uMp: SensapexDevice):
+    PARAMETERS = {
+        "ic_bridge_enabled": {
+            "initial_value": False,
+        },
+        "ic_bridge_gain": {
+            "initial_value": None,  # todo what is this really?
+        },
+        "ic_cfast_enabled": {
+            "initial_value": False,
+        },
+        "ic_cfast_gain": {
+            "initial_value": None,  # todo what is this really?
+        },
+        "ic_dac": {  # todo what's this
+            "initial_value": None,  # todo what is this really?
+        },
+        "clamp_mode": {
+            "initial_value": "VC",
+        },
+        "current_input_range": {
+            "initial_value": 200e-12,
+        },
+        "current_output_range": {
+            "initial_value": None,  # todo what is this really?
+        },
+        "trig_bit": {  # todo what's this
+            "initial_value": None,  # todo what is this really?
+        },
+        "vc_cfast_enabled": {
+            "initial_value": False,
+        },
+        "vc_cfast_gain": {
+            "initial_value": None,  # todo what is this really?
+        },
+        "vc_cslow_enabled": {
+            "initial_value": False,
+        },
+        "vc_cslow_gain": {
+            "initial_value": None,  # todo what is this really?
+        },
+        "vc_cslow_tau": {
+            "initial_value": None,  # todo what is this really?
+        },
+        "vc_dac": {  # todo what's this
+            "initial_value": None,  # todo what is this really?
+        },
+        "vc_serial_resistance_enabled": {
+            "initial_value": False,
+        },
+        "vc_serial_resistance_gain": {
+            "initial_value": None,  # todo what is this really?
+        },
+        "vc_serial_resistance_lag_filter": {
+            "initial_value": None,  # todo what is this really?
+        },
+        "vc_serial_resistance_prediction_rise_factor": {
+            "initial_value": 2,
+        },
+        "vc_serial_resistance_tau": {
+            "initial_value": None,  # todo what is this really?
+        },
+        "vc_voltage_offset": {
+            "initial_value": None,  # todo what is this really?
+        },
+        "receive_waits_for_trigger": {  # todo how do we best support this
+            "initial_value": None,  # todo what is this really?
+        },
+        "zap": {  # todo is zap really part of this
+            "initial_value": False,
+        },
+    }
+
+    def __init__(self, uMp: SensapexDevice):
+        # TODO should we enforce only making one of these per device
         self._recv_handlers_raw = []
         self._state = _uma_state_struct()
-        self._lock = sensapex_connection.lock
-        self._libuma = sensapex_connection.libuma
-        self.sensapex = sensapex_connection
-        self.call("init", sensapex_connection.h, c_int(uMp.dev_id))
-        # `init` sets the following:
+        self._lock = uMp.ump.lock
+        self._libuma = uMp.ump.libuma
+        self.sensapex = uMp.ump
+        self.call("init", uMp.ump.h, c_int(uMp.dev_id))
         self._sample_rate = 9776
         self._current_input_range = 200e-12
-        self._clamp_mode = "VC"
-        self._compensations = {
-            "cslow": {
-                "enabled": False,
-                "gain": None,  # TODO what is this actually?
-                "tau": None,  # TODO what is this actually?
-            },
-            "serial_resistance": {
-                "enabled": False,
-                "gain": None,  # TODO what is this actually?
-                "tau": None,  # TODO what is this actually?
-                "range": None,  # TODO what is this actually?
-                "lag_filter": None,  # TODO what is this actually?
-            },
-            "cfast": {"enabled": False, "gain": None,},  # TODO what is this actually?
-            "bridge": {"enabled": False, "gain": None,},  # TODO what is this actually?
-        }
-        # TODO how do we track the following initial states: no reset, no RUN, no ZAP
-        # TODO wouldn't it be better to ask for these values from the sdk?
+        self._param_cache = {name: conf["initial_value"] for name, conf in self.PARAMETERS.items()}
+        # TODO how do we track the following initial states: no reset ( and what even is it? )
 
         self._voltage_range = 700e-3
         self._run_recv_thread = True
@@ -149,14 +204,17 @@ class UMA(object):
         stim_len = stimulus.shape[0]
         if stim_len > 749:
             raise ValueError(f"Stimulus must have 749 or fewer points. Received {stim_len}.")
-        # TODO check for clipping?
+        # TODO check for clipping, maybe?
         stimulus = stimulus.astype(c_int)
         c_stimulus = np.ctypeslib.as_ctypes(stimulus)
         self.call("stimulus", c_int(stim_len), c_stimulus, c_bool(trigger_sync))
 
-    def set_clamp_mode(self, mode: Union[Literal["VC"], Literal["IC"]]) -> None:
+    def get_clamp_mode(self) -> str:
+        return self.get_param("clamp_mode")
+
+    def set_clamp_mode(self, mode: Union[Literal["VC"], Literal["IC"], Literal["I=0"]]) -> None:
         """
-        Enable either current (IC) or voltage (VC) clamp mode.
+        Set the clamping mode.
 
         This will disable all incompatible compensation circuits, and re-enable any compensations that were previously
         enabled.
@@ -164,31 +222,38 @@ class UMA(object):
         Parameters
         ----------
         mode
-            Either "IC" for current clamp or "VC" for voltage clamp.
+            One of "IC" for current clamp, "I=0" for current clamp with a holding current of 0, or "VC" for voltage
+            clamp.
         """
-        if mode == self._clamp_mode:
+        if mode == self.get_clamp_mode():
             return
-        self._clamp_mode = mode
-        if mode == "IC":
-            self._enable_vc_mode()
-        elif mode == "VC":
-            self._enable_ic_mode()
-        else:
-            raise ValueError(f"'{mode}' is not a valid clamp mode. Only 'VC' and 'IC' are accepted.")
+        self._param_cache["clamp_mode"] = mode
+        with self.pause_receiving():
+            if mode == "IC":
+                self._enable_ic_mode()
+            elif mode == "I=0":
+                self._enable_ic_mode()
+                self.set_holding_current(0)
+            elif mode == "VC":
+                self._enable_vc_mode()
+            else:
+                raise ValueError(f"'{mode}' is not a valid clamp mode. Only 'VC' and 'IC' are accepted.")
 
     def _enable_ic_mode(self):
-        self.set_cfast(enabled=False)
-        self.set_bridge(enabled=False)
-        self.set_cslow(**self._compensations["cslow"])
-        self.set_serial_resistance(**self._compensations["serial_resistance"])
-        self.call("set_current_clamp_mode", c_bool(False))
+        self.set_vc_cfast(enabled=False, _remember_enabled=False)
+        self.set_vc_cslow(enabled=False, _remember_enabled=False)
+        self.set_vc_serial_resistance(enabled=False, _remember_enabled=False)
+        self.call("set_current_clamp_mode", c_bool(True))
+        self.set_ic_cfast(enabled=self.get_param("ic_cfast_enabled"))
+        self.set_ic_bridge(enabled=self.get_param("ic_bridge_enabled"))
 
     def _enable_vc_mode(self):
-        self.set_cslow(enabled=False)
-        self.set_serial_resistance(enabled=False)
-        self.set_cfast(**self._compensations["cfast"])
-        self.set_bridge(**self._compensations["bridge"])
-        self.call("set_current_clamp_mode", c_bool(True))
+        self.set_ic_cfast(enabled=False, _remember_enabled=False)
+        self.set_ic_bridge(enabled=False, _remember_enabled=False)
+        self.call("set_current_clamp_mode", c_bool(False))
+        self.set_vc_cslow(enabled=self.get_param("vc_cslow_enabled"))
+        self.set_vc_serial_resistance(enabled=self.get_param("vc_serial_resistance_enabled"))
+        self.set_vc_cfast(enabled=self.get_param("vc_cfast_enabled"))
 
     VALID_SAMPLE_RATES = (1221, 4883, 9776, 19531, 50000, 100000, 200000)
 
@@ -217,7 +282,7 @@ class UMA(object):
                 f"'{current_range}' is not a valid current range. Choose from {self.VALID_CURRENT_INPUT_RANGES}."
             )
         with self.pause_receiving():
-            self._current_input_range = current_range
+            self._param_cache["current_input_range"] = current_range
             self.call("set_range", c_int(int(current_range / 1e-12)))  # Convert to int pA first
 
     VALID_CURRENT_OUTPUT_RANGES = (3.75e-9, 150e-9)
@@ -227,42 +292,98 @@ class UMA(object):
             raise ValueError(
                 f"'{current_range}' is not a valid current range. Choose from {self.VALID_CURRENT_OUTPUT_RANGES}."
             )
+        self._param_cache["current_output_range"] = current_range
         self.call("enable_cc_higher_range", c_bool(current_range == 3.75e-9))
 
-    def zap(self, duration=None):
+    def zap(self, enabled: bool = True, duration: float = None):
+        # TODO test this. understand zap. thread the sleep.
         with self.pause_receiving():
-            self.call("set_zap", c_bool(True))
+            self.call("set_zap", c_bool(enabled))
         if duration is not None:
             time.sleep(duration)
             with self.pause_receiving():
-                self.call("set_zap", c_bool(False))
+                self.call("set_zap", c_bool(False))  # TODO or `not enabled`?
 
-    def set_cslow(self, enabled: bool = None, gain: float = None, tau: float = None) -> None:
-        if enabled and self._clamp_mode != "VC":
+    def set_vc_cslow(self, enabled: bool = None, gain: float = None, tau: float = None, _remember_enabled=True) -> None:
+        # TODO test this
+        if enabled and self.get_clamp_mode() != "VC":
             raise ValueError("cslow compensation cannot be enabled in IC mode")
-        # TODO
+        if gain is not None:
+            self._param_cache["vc_cslow_gain"] = gain
+        if tau is not None:
+            self._param_cache["vc_cslow_tau"] = tau
+            self.call("set_vc_cslow_tau", c_float(tau))
+        if enabled:
+            self.call("set_vc_cslow_gain", c_float(self.get_param("vc_cslow_gain")))
+        elif enabled is not None:
+            self.call("set_vc_cslow_gain", c_float(0.0))
 
-    def set_cfast(self, enabled: bool = None, gain: float = None) -> None:
-        if enabled and self._clamp_mode != "IC":
+    def set_vc_cfast(self, enabled: bool = None, gain: float = None, _remember_enabled=True) -> None:
+        # TODO test this. scale.
+        if enabled and self.get_clamp_mode() != "IC":
             raise ValueError("cfast compensation cannot be enabled in VC mode")
-        # TODO
+        if gain is not None:
+            self._param_cache["vc_cfast_gain"] = gain
+        if enabled:
+            self.call("set_vc_cfast_gain", c_float(self.get_param("vc_cfast_gain")))
+        elif enabled is not None:
+            self.call("set_vc_cfast_gain", c_float(0.0))
 
-    def set_serial_resistance(
+    def set_ic_cfast(self, enabled: bool = None, gain: float = None, _remember_enabled=True) -> None:
+        # TODO test this. scale.
+        if enabled and self.get_clamp_mode() != "IC":
+            raise ValueError("cfast compensation cannot be enabled in VC mode")
+        if gain is not None:
+            self._param_cache["ic_cfast_gain"] = gain
+        if enabled:
+            self.call("set_cc_cfast_gain", c_float(self.get_param("ic_cfast_gain")))
+        elif enabled is not None:
+            self.call("set_cc_cfast_gain", c_float(0.0))
+
+    def set_vc_serial_resistance(
         self,
         enabled: bool = None,
         gain: float = None,
-        prediction_rise_factor: int = None,  # 2 or 3
+        prediction_rise_factor: Union[Literal[2], Literal[3]] = None,
         tau: float = None,
         lag_filter: bool = None,
+        _remember_enabled=True,
     ) -> None:
-        if enabled and self._clamp_mode != "VC":
+        if enabled and self.get_clamp_mode() != "VC":
             raise ValueError("serial resistance compensation cannot be enabled in IC mode")
+        if gain is not None:
+            self._param_cache["vc_serial_resistance_gain"] = gain
+        if prediction_rise_factor is not None:
+            self._param_cache["vc_serial_resistance_prediction_rise_factor"] = prediction_rise_factor
+            self.call("set_vc_rs_pred_3x_gain", c_bool(prediction_rise_factor == 3))
+            # TODO api call
+        if tau is not None:
+            self._param_cache["vc_serial_resistance_tau"] = tau
+            # TODO api call
+        if lag_filter is not None:
+            self._param_cache["vc_serial_resistance_lag_filter"] = lag_filter
+            # TODO api call
+        if _remember_enabled:
+            self._param_cache["vc_serial_resistance_enabled"] = enabled
+        if enabled:
+            self.call("set_vc_rs_corr_gain", c_int(self.get_param("vc_serial_resistance_gain")))
+        elif enabled is not None:
+            self.call("set_vc_rs_corr_gain", c_int(0))
         # TODO
+        # TODO scale, testing
 
-    def set_bridge(self, enabled: bool = None, gain: float = None):
-        if enabled and self._clamp_mode != "IC":
+    def set_ic_bridge(self, enabled: bool = None, gain: int = None, _remember_enabled=True):
+        if enabled and self.get_clamp_mode() != "IC":
             raise ValueError("bridge compensation cannot be enabled in VC mode")
-        # TODO
+        if gain is not None:
+            self._param_cache["ic_bridge_gain"] = gain
+        if _remember_enabled:
+            self._param_cache["ic_bridge_enabled"] = enabled
+        if enabled:
+            self.call("set_cc_bridge_gain", c_int(self.get_param("ic_bridge_gain")))
+        elif enabled is not None:
+            self.call("set_cc_bridge_gain", c_int(0))
+        # TODO scale, testing
 
     def _do_recv_forever(self):
         while self._run_recv_thread:
@@ -316,12 +437,14 @@ class UMA(object):
         self._recv_handlers_raw.append((column, handler))
 
     def quit(self):
+        """TODO"""
         self.stop_receiving()
         self._run_recv_thread = False
         self._recv_thread.join()
 
     @contextmanager
     def pause_receiving(self):
+        """TODO"""
         was_receiving = self.is_receiving()
         self.stop_receiving()
         yield
@@ -330,6 +453,37 @@ class UMA(object):
 
     def is_receiving(self):
         return self._run_recv_thread and not self._pause_recv_thread
+
+    def get_holding_current(self):
+        return self.get_param("holding_current")
+
+    def get_holding_voltage(self):
+        return self.get_param("holding_voltage")
+
+    def set_holding_current(self, hold_at: float):
+        pass  # TODO
+
+    def set_holding_voltage(self, hold_at: float):
+        pass  # TODO
+
+    def get_param(self, name):
+        # The sdk doesn't provide this feature
+        if name not in self._param_cache:
+            raise ValueError(f"{name} is not a valid parameter name. Choose from {set(self._param_cache.keys())}")
+        return self._param_cache[name]
+
+    def get_params(self, param_names: Iterable[str] = None) -> Dict:
+        if param_names is None:
+            param_names = self._param_cache.keys()
+        return {name: self._param_cache[name] for name in param_names}
+
+    def set_param(self, param, value):
+        pass  # TODO
+
+    def set_vc_voltage_offset(self, offset):
+        # TODO scale, test
+        with self.pause_receiving():
+            self.call("set_vc_voltage_offset", c_float(offset))
 
 
 if __name__ == "__main__":
@@ -344,7 +498,7 @@ if __name__ == "__main__":
 
     print(um.list_devices())
     dev1 = um.get_device(1)
-    uma = UMA(um, dev1)
+    uma = UMA(dev1)
 
     # _uma_lib = cdll.LoadLibrary("/home/martin/src/acq4/uma-sdk/src/lib/libuma.so")
     dev_array = (c_int * LIBUM_MAX_DEVS)()
@@ -377,7 +531,7 @@ if __name__ == "__main__":
     voltage_offset = 0
 
     # units: mV
-    uma.call("set_vc_voltage_offset", c_float(voltage_offset))
+    uma.set_vc_voltage_offset(voltage_offset)
 
     # uma.call("set_vc_cfast_gain", c_float(value))
     # uma.call("set_vc_cslow_gain", c_float(value))
@@ -510,7 +664,7 @@ if __name__ == "__main__":
             global timer, stim_timer, graph_data
             start_ts = graph_data["ts"][-1]
             print(f"latest timestamp on a sample at start stim {start_ts}")
-            insert_stim(2**9)
+            insert_stim(2 ** 9)
             print("sleeping")
             time.sleep(2)
             local_read_data = graph_data.copy()
@@ -521,4 +675,5 @@ if __name__ == "__main__":
                 print(f"time difference: {trig_time - start_ts}")
             except IndexError:
                 print("Could not detect a current > 20e-12")
+
         Thread(target=_do_test, daemon=True).start()

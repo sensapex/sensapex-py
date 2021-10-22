@@ -83,6 +83,9 @@ class UMA(object):
         "current_output_range": {
             "initial_value": None,  # todo what is this really?
         },
+        "sample_rate": {
+            "initial_value": 9776,
+        },
         "trig_bit": {  # todo what's this
             "initial_value": None,  # todo what is this really?
         },
@@ -132,13 +135,12 @@ class UMA(object):
 
     def __init__(self, uMp: SensapexDevice):
         # TODO should we enforce only making one of these per device
-        self._recv_handlers_raw = []
+        self._recv_handlers = []
         self._state = _uma_state_struct()
         self._lock = uMp.ump.lock
         self._libuma = uMp.ump.libuma
         self.sensapex = uMp.ump
         self.call("init", uMp.ump.h, c_int(uMp.dev_id))
-        self._sample_rate = 9776
         self._current_input_range = 200e-12
         self._param_cache = {name: conf["initial_value"] for name, conf in self.PARAMETERS.items()}
         # TODO how do we track the following initial states: no reset ( and what even is it? )
@@ -201,6 +203,9 @@ class UMA(object):
         """
         if len(stimulus.shape) != 1:
             raise ValueError(f"Stimulus may only be 1D. Received {stimulus.shape}.")
+        too_big = 2**9 if self.get_clamp_mode() == "VC" else 2**17
+        if np.max(np.abs(stimulus)) > too_big:
+            raise ValueError(f"Stimulus values may not exceed ±{too_big}")
         stim_len = stimulus.shape[0]
         if stim_len > 749:
             raise ValueError(f"Stimulus must have 749 or fewer points. Received {stim_len}.")
@@ -209,10 +214,17 @@ class UMA(object):
         c_stimulus = np.ctypeslib.as_ctypes(stimulus)
         self.call("stimulus", c_int(stim_len), c_stimulus, c_bool(trigger_sync))
 
+    def send_stimulus_scaled(self, stimulus: np.ndarray, trigger_sync: bool = False, scale=1):
+        if self.get_clamp_mode() == "VC":
+            scale *= 0.7
+        else:  # IC
+            scale *= self._current_input_range
+        self.send_stimulus_raw((stimulus / scale).astype(int), trigger_sync)
+
     def get_clamp_mode(self) -> str:
         return self.get_param("clamp_mode")
 
-    def set_clamp_mode(self, mode: Union[Literal["VC"], Literal["IC"], Literal["I=0"]]) -> None:
+    def set_clamp_mode(self, mode: Union[Literal["VC"], Literal["IC"]]) -> None:
         """
         Set the clamping mode.
 
@@ -222,8 +234,7 @@ class UMA(object):
         Parameters
         ----------
         mode
-            One of "IC" for current clamp, "I=0" for current clamp with a holding current of 0, or "VC" for voltage
-            clamp.
+            One of "IC" for current clamp, or "VC" for voltage clamp.
         """
         if mode == self.get_clamp_mode():
             return
@@ -231,9 +242,6 @@ class UMA(object):
         with self.pause_receiving():
             if mode == "IC":
                 self._enable_ic_mode()
-            elif mode == "I=0":
-                self._enable_ic_mode()
-                self.set_holding_current(0)
             elif mode == "VC":
                 self._enable_vc_mode()
             else:
@@ -261,7 +269,7 @@ class UMA(object):
         if rate not in self.VALID_SAMPLE_RATES:
             raise ValueError(f"'{rate}' is an invalid sample rate. Choose from {self.VALID_SAMPLE_RATES}.")
         with self.pause_receiving():
-            self._sample_rate = rate
+            self._param_cache["sample_rate"] = rate
             self.call("set_sample_rate", c_int(rate))
 
     VALID_CURRENT_INPUT_RANGES = (200e-12, 2000e-12, 20000e-12, 200000e-12)
@@ -294,6 +302,9 @@ class UMA(object):
             )
         self._param_cache["current_output_range"] = current_range
         self.call("enable_cc_higher_range", c_bool(current_range == 3.75e-9))
+
+    def get_current_output_range(self):
+        return self._param_cache["current_output_range"]
 
     def zap(self, enabled: bool = True, duration: float = None):
         # TODO test this. understand zap. thread the sleep.
@@ -399,11 +410,16 @@ class UMA(object):
                 else:
                     raise e
             else:
-                for column, handler in self._recv_handlers_raw:
+                float_cast_data = {}
+                for column, handler, scale in self._recv_handlers:
                     if column is None:
                         handler(self._np_recv_buffer)
-                    else:
+                    elif scale is None:
                         handler(self._np_recv_buffer[column])
+                    else:
+                        if column not in float_cast_data:
+                            float_cast_data[column] = self._np_recv_buffer[column].astype(float)
+                        handler(float_cast_data[column] * scale)
 
     def start_receiving(self):
         """
@@ -419,22 +435,39 @@ class UMA(object):
 
     def add_receive_data_handler_raw(self, handler, column=None):
         """
+            TODO mention scaled methods, removal
 
         Parameters
         ----------
         handler
             This callable should accept a single ndarray argument with a data type that mirrors `_uma_capture_struct` or
             one of its columns (if the `column` parameter is set). Data domains and ranges of this object will vary.
-            "voltage" will be `±2**10 -> ±700mV`. "current" will be `±2**13 -> ±self.current_range`. "ts" (which stands
-            for "timestamp") will be `TODO`.
-            TODO mention conversion methods
+            "voltage" will be `±2**9 -> ±700mV`. "current" will be `±2**17 -> ±self.current_range`. "ts" (which stands
+            for "timestamp") will be `µs`.
         column : str
             If set, this specifies that only one column of the data will be passed to the handler (e.g. "voltage").
         """
         valid_columns = self._np_recv_buffer.dtype.names
         if column is not None and column not in valid_columns:
             raise ValueError(f"'{column}' is not a valid column name for captured data. Choose from {valid_columns}")
-        self._recv_handlers_raw.append((column, handler))
+        with self._lock:
+            self._recv_handlers.append((column, handler, None))
+
+    def add_receive_data_handler_scaled(self, handler, column, scale=1):
+        """TODO"""
+        if column == "ts":
+            scale *= 1e-6
+        elif column == "voltage":
+            scale *= 0.7
+        elif column == "current":
+            scale *= self.get_current_output_range()
+        with self._lock:
+            self._recv_handlers.append((handler, column, scale))
+
+    def remove_receive_data_handler(self, handler, column=None):
+        """ TODO """
+        with self._lock:
+            self._recv_handlers = [(h, c, s) for h, c, s in self._recv_handlers if h != handler and c != column]
 
     def quit(self):
         """TODO"""
@@ -461,10 +494,12 @@ class UMA(object):
         return self.get_param("holding_voltage")
 
     def set_holding_current(self, hold_at: float):
-        pass  # TODO
+        # TODO only actually call if in the correct mode
+        pass  # TODO uma.call("set_cc_dac", c_int16(vc_dac))
 
     def set_holding_voltage(self, hold_at: float):
-        pass  # TODO
+        # TODO only actually call if in the correct mode
+        pass  # TODO uma.call("set_vc_dac", c_int16(vc_dac))
 
     def get_param(self, name):
         # The sdk doesn't provide this feature

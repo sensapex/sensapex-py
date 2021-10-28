@@ -18,7 +18,7 @@ from ctypes import (
     c_float,
 )
 from threading import Thread
-from typing import Union, Iterable, Dict
+from typing import Union, Iterable, Dict, List, Any, Tuple
 
 import numpy as np
 from typing_extensions import Literal
@@ -56,6 +56,8 @@ class _uma_capture_struct(Structure):
 class UMA(object):
     """Class representing a uMa device ( itself attached to a uMp )"""
 
+    _recv_handlers: List[Tuple[Union[str, None], Any, Any]]
+
     UMA_CAPTURES_PER_PACKET = 1440 // sizeof(_uma_capture_struct)
 
     PARAMETERS = {
@@ -71,8 +73,8 @@ class UMA(object):
         "ic_cfast_gain": {
             "initial_value": None,  # todo what is this really?
         },
-        "ic_dac": {  # todo what's this
-            "initial_value": None,  # todo what is this really?
+        "ic_dac": {
+            "initial_value": None,  # todo what's this  # todo what is this really?
         },
         "clamp_mode": {
             "initial_value": "VC",
@@ -81,13 +83,13 @@ class UMA(object):
             "initial_value": 200e-12,
         },
         "current_output_range": {
-            "initial_value": None,  # todo what is this really?
+            "initial_value": 150e-9,  # TODO test that this is correct
         },
         "sample_rate": {
             "initial_value": 9776,
         },
-        "trig_bit": {  # todo what's this
-            "initial_value": None,  # todo what is this really?
+        "trig_bit": {
+            "initial_value": None,  # todo what's this  # todo what is this really?
         },
         "vc_cfast_enabled": {
             "initial_value": False,
@@ -104,8 +106,8 @@ class UMA(object):
         "vc_cslow_tau": {
             "initial_value": None,  # todo what is this really?
         },
-        "vc_dac": {  # todo what's this
-            "initial_value": None,  # todo what is this really?
+        "vc_dac": {
+            "initial_value": None,  # todo what's this  # todo what is this really?
         },
         "vc_serial_resistance_enabled": {
             "initial_value": False,
@@ -128,8 +130,8 @@ class UMA(object):
         "receive_waits_for_trigger": {  # todo how do we best support this
             "initial_value": None,  # todo what is this really?
         },
-        "zap": {  # todo is zap really part of this
-            "initial_value": False,
+        "zap": {
+            "initial_value": False,  # todo is zap really part of this
         },
     }
 
@@ -203,7 +205,7 @@ class UMA(object):
         """
         if len(stimulus.shape) != 1:
             raise ValueError(f"Stimulus may only be 1D. Received {stimulus.shape}.")
-        too_big = 2**9 if self.get_clamp_mode() == "VC" else 2**17
+        too_big = 2 ** 9 if self.get_clamp_mode() == "VC" else 2 ** 17
         if np.max(np.abs(stimulus)) > too_big:
             raise ValueError(f"Stimulus values may not exceed ±{too_big}")
         stim_len = stimulus.shape[0]
@@ -301,6 +303,7 @@ class UMA(object):
                 f"'{current_range}' is not a valid current range. Choose from {self.VALID_CURRENT_OUTPUT_RANGES}."
             )
         self._param_cache["current_output_range"] = current_range
+        # TODO test that this number is working correctly (the header file's boolean and values are seemingly switched)
         self.call("enable_cc_higher_range", c_bool(current_range == 3.75e-9))
 
     def get_current_output_range(self):
@@ -352,13 +355,13 @@ class UMA(object):
             self.call("set_cc_cfast_gain", c_float(0.0))
 
     def set_vc_serial_resistance(
-        self,
-        enabled: bool = None,
-        gain: float = None,
-        prediction_rise_factor: Union[Literal[2], Literal[3]] = None,
-        tau: float = None,
-        lag_filter: bool = None,
-        _remember_enabled=True,
+            self,
+            enabled: bool = None,
+            gain: float = None,
+            prediction_rise_factor: Union[Literal[2], Literal[3]] = None,
+            tau: float = None,
+            lag_filter: bool = None,
+            _remember_enabled=True,
     ) -> None:
         if enabled and self.get_clamp_mode() != "VC":
             raise ValueError("serial resistance compensation cannot be enabled in IC mode")
@@ -433,7 +436,7 @@ class UMA(object):
         self._pause_recv_thread = True
         self.call("stop")
 
-    def add_receive_data_handler_raw(self, handler, column=None):
+    def add_receive_data_handler_raw(self, handler, column: str = None):
         """
             TODO mention scaled methods, removal
 
@@ -453,21 +456,21 @@ class UMA(object):
         with self._lock:
             self._recv_handlers.append((column, handler, None))
 
-    def add_receive_data_handler_scaled(self, handler, column, scale=1):
+    def add_receive_data_handler_scaled(self, handler, column: str, scale=1):
         """TODO"""
         if column == "ts":
             scale *= 1e-6
         elif column == "voltage":
-            scale *= 0.7
+            scale *= 0.7 / (2 ** 9)
         elif column == "current":
-            scale *= self.get_current_output_range()
+            scale *= self.get_current_output_range() / (2 ** 17)
         with self._lock:
-            self._recv_handlers.append((handler, column, scale))
+            self._recv_handlers.append((column, handler, scale))
 
     def remove_receive_data_handler(self, handler, column=None):
         """ TODO """
         with self._lock:
-            self._recv_handlers = [(h, c, s) for h, c, s in self._recv_handlers if h != handler and c != column]
+            self._recv_handlers = [(c, h, s) for c, h, s in self._recv_handlers if h != handler and c != column]
 
     def quit(self):
         """TODO"""
@@ -609,36 +612,40 @@ if __name__ == "__main__":
     )
     t_offset = None
 
+
     def handle_raw_recv(received_data):
         global graph_data, t_offset
         t_offset = received_data["ts"][0] if t_offset is None else t_offset
         graph_data = np.roll(graph_data, -len(received_data))
 
-        graph_data[-len(received_data) :]["ts"] = (received_data["ts"] - t_offset) * 1e-6
+        graph_data[-len(received_data):]["ts"] = (received_data["ts"] - t_offset) * 1e-6
         # ±range_of_current pA w.r.t. ground/common
         # read_data[-len(np_buff):]["current"] = (1e-12 * range_of_current / (2 ** 15)) * np_buff["current"]
-        graph_data[-len(received_data) :]["current"] = (range_of_current / (2 ** 15)) * (
-            received_data["current"].astype(int) - 2 ** 15
+        graph_data[-len(received_data):]["current"] = (range_of_current / (2 ** 15)) * (
+                received_data["current"].astype(int) - 2 ** 15
         )
         # ±700 mV w.r.t. ground/common
         # read_data[-len(np_buff):]["voltage"] = np_buff["voltage"] * (0.7 / 2 ** 15)
-        graph_data[-len(received_data) :]["voltage"] = (0.7 / 2 ** 15) * (
-            received_data["voltage"].astype(int) - 2 ** 15
+        graph_data[-len(received_data):]["voltage"] = (0.7 / 2 ** 15) * (
+                received_data["voltage"].astype(int) - 2 ** 15
         )
-        graph_data[-len(received_data) :]["status"] = received_data["status"]
+        graph_data[-len(received_data):]["status"] = received_data["status"]
+
 
     def handle_scaled_recv(received_data):
         global graph_data, t_offset
         t_offset = received_data["ts"][0] if t_offset is None else t_offset
         graph_data = np.roll(graph_data, -len(received_data))
 
-        graph_data[-len(received_data) :]["ts"] = received_data["ts"] - t_offset
-        graph_data[-len(received_data) :]["current"] = received_data["current"]
-        graph_data[-len(received_data) :]["voltage"] = received_data["voltage"]
-        graph_data[-len(received_data) :]["status"] = received_data["status"]
+        graph_data[-len(received_data):]["ts"] = received_data["ts"] - t_offset
+        graph_data[-len(received_data):]["current"] = received_data["current"]
+        graph_data[-len(received_data):]["voltage"] = received_data["voltage"]
+        graph_data[-len(received_data):]["status"] = received_data["status"]
+
 
     uma.add_receive_data_handler_raw(handle_raw_recv)
     uma.start_receiving()
+
 
     def update_plots():
         t = graph_data["ts"]
@@ -646,14 +653,17 @@ if __name__ == "__main__":
         p2.plot(t, graph_data["voltage"], clear=True)
         p3.plot(t, graph_data["status"], clear=True)
 
+
     timer = pg.QtCore.QTimer()
     timer.timeout.connect(update_plots)
     timer.start(10)
+
 
     def insert_stim(magnitude=30):
         global np_stimulus
         np_stimulus[0:-20] = magnitude
         uma.send_stimulus_raw(np_stimulus, trig)
+
 
     def stim_train():
         def _do_stims():
@@ -675,8 +685,10 @@ if __name__ == "__main__":
         t = Thread(target=_do_stims, daemon=True)
         t.start()
 
+
     stim_timer = pg.QtCore.QTimer()
     stim_timer.timeout.connect(insert_stim)
+
 
     # stim_timer.start(1000)
 
@@ -685,14 +697,18 @@ if __name__ == "__main__":
         stim_timer.stop()
         uma.quit()
 
+
     atexit.register(cleanup)
+
 
     def pause():
         time.sleep(0.1)
         uma.stop_receiving()
 
+
     def unpause():
         uma.start_receiving()
+
 
     def test_stim():
         def _do_test():

@@ -211,12 +211,11 @@ class UMA(object):
         if np.max(np.abs(stimulus)) > too_big:
             raise ValueError(f"Stimulus values may not exceed ±{too_big}")
         stim_len = stimulus.shape[0]
-        if stim_len > 749:
-            raise ValueError(f"Stimulus must have 749 or fewer points. Received {stim_len}.")
-        # TODO check for clipping, maybe?
         stimulus = stimulus.astype(c_int)
-        c_stimulus = np.ctypeslib.as_ctypes(stimulus)
-        self.call("stimulus", c_int(stim_len), c_stimulus, c_bool(trigger_sync))
+        # Sensapex segfaults on more than 749 points, so chunk it
+        for stim_chunk in np.array_split(stimulus, range(min(stim_len, 749), stim_len, 749)):
+            c_stim = np.ctypeslib.as_ctypes(stim_chunk)
+            self.call("stimulus", c_int(stim_chunk.shape[0]), c_stim, c_bool(trigger_sync))
 
     def send_stimulus_scaled(self, stimulus: np.ndarray, trigger_sync: bool = False, scale=1):
         if self.get_clamp_mode() == "VC":

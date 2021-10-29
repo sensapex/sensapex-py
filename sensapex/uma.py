@@ -205,6 +205,8 @@ class UMA(object):
         """
         if len(stimulus.shape) != 1:
             raise ValueError(f"Stimulus may only be 1D. Received {stimulus.shape}.")
+        if stimulus.dtype != int:
+            raise ValueError("Raw stimulus must be sent as integers.")
         too_big = 2 ** 9 if self.get_clamp_mode() == "VC" else 2 ** 17
         if np.max(np.abs(stimulus)) > too_big:
             raise ValueError(f"Stimulus values may not exceed ±{too_big}")
@@ -422,7 +424,7 @@ class UMA(object):
                     else:
                         if column not in float_cast_data:
                             float_cast_data[column] = self._np_recv_buffer[column].astype(float)
-                        handler(float_cast_data[column] * scale)
+                        handler(float_cast_data[column] * scale)  # 0.7 / 2**9
 
     def start_receiving(self):
         """
@@ -461,9 +463,9 @@ class UMA(object):
         if column == "ts":
             scale *= 1e-6
         elif column == "voltage":
-            scale *= 0.7 / (2 ** 9)
+            scale *= 0.7 / (2 ** 15)
         elif column == "current":
-            scale *= self.get_current_output_range() / (2 ** 17)
+            scale *= self.get_current_output_range() / (2 ** 15)
         with self._lock:
             self._recv_handlers.append((column, handler, scale))
 
@@ -593,7 +595,7 @@ if __name__ == "__main__":
 
     # Stimulus setup
     N_SAMPLES = 600  # max 749
-    np_stimulus = np.zeros((N_SAMPLES,))
+    np_stimulus = np.zeros((N_SAMPLES,), dtype=int)
 
     w = pg.GraphicsLayoutWidget()
     p1 = w.addPlot(row=0, col=0)
@@ -667,14 +669,15 @@ if __name__ == "__main__":
 
     def stim_train():
         def _do_stims():
-            for i in range(18):
+            stim_max = 17 // 2 if uma.get_clamp_mode() == "IC" else 9 // 2
+            for i in range(stim_max):
                 print(f"stimming at 2**{i}")
                 insert_stim((2 ** i))
                 time.sleep(0.1)
                 print(f"stimming at 2**{i}-1")
                 insert_stim((2 ** i) - 1)
             time.sleep(0.1)
-            for i in range(18):
+            for i in range(stim_max):
                 print(f"stimming at -2**{i}")
                 insert_stim(-(2 ** i))
                 time.sleep(0.1)

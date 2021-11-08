@@ -65,13 +65,13 @@ class UMA(object):
             "initial_value": False,
         },
         "ic_bridge_gain": {
-            "initial_value": None,  # todo what is this really?
+            "initial_value": 0,
         },
         "ic_cfast_enabled": {
             "initial_value": False,
         },
         "ic_cfast_gain": {
-            "initial_value": None,  # todo what is this really?
+            "initial_value": None,  # todo what is "min gain and tau"
         },
         "ic_dac": {
             "initial_value": None,  # todo what's this  # todo what is this really?
@@ -378,27 +378,38 @@ class UMA(object):
         if lag_filter is not None:
             self._param_cache["vc_serial_resistance_lag_filter"] = lag_filter
             # TODO api call
-        if _remember_enabled:
+        if _remember_enabled and enabled is not None:
             self._param_cache["vc_serial_resistance_enabled"] = enabled
         if enabled:
             self.call("set_vc_rs_corr_gain", c_int(self.get_param("vc_serial_resistance_gain")))
         elif enabled is not None:
             self.call("set_vc_rs_corr_gain", c_int(0))
-        # TODO
         # TODO scale, testing
 
     def set_ic_bridge(self, enabled: bool = None, gain: int = None, _remember_enabled=True):
+        """In current-clamp mode, set the bridge compensation circuit.
+
+        Parameters
+        ----------
+        enabled : bool|None
+        gain : int
+            Gain in Ω, between 0-40 MΩ, with a 1 MΩ step.
+        _remember_enabled
+            Internal use.
+        """
         if enabled and self.get_clamp_mode() != "IC":
             raise ValueError("bridge compensation cannot be enabled in VC mode")
         if gain is not None:
+            if gain < 0 or gain > 40e6:
+                raise ValueError("Bridge gain must be between 0-40 MΩ")
             self._param_cache["ic_bridge_gain"] = gain
-        if _remember_enabled:
+        if _remember_enabled and enabled is not None:
             self._param_cache["ic_bridge_enabled"] = enabled
         if enabled:
-            self.call("set_cc_bridge_gain", c_int(self.get_param("ic_bridge_gain")))
+            self.call("set_cc_bridge_gain", c_int(self.get_param("ic_bridge_gain") // 1e6))
         elif enabled is not None:
             self.call("set_cc_bridge_gain", c_int(0))
-        # TODO scale, testing
+        # TODO test
 
     def _do_recv_forever(self):
         while self._run_recv_thread:

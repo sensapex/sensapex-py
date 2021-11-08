@@ -71,7 +71,7 @@ class UMA(object):
             "initial_value": False,
         },
         "ic_cfast_gain": {
-            "initial_value": None,  # todo what is "min gain and tau"
+            "initial_value": 0,
         },
         "ic_dac": {
             "initial_value": None,  # todo what's this  # todo what is this really?
@@ -352,15 +352,29 @@ class UMA(object):
             self.call("set_vc_cfast_gain", c_float(0.0))
 
     def set_ic_cfast(self, enabled: bool = None, gain: float = None, _remember_enabled=True) -> None:
-        # TODO test this. scale.
+        """Set current-clamp C-fast compensation circuit.
+
+        Parameters
+        ----------
+        enabled : bool
+        gain : float
+            Gain in Farads, between 0-31.875 pF, with a 1 pF resolution.
+        _remember_enabled
+            Internal use
+        """
+        # TODO test
         if enabled and self.get_clamp_mode() != "IC":
             raise ValueError("cfast compensation cannot be enabled in VC mode")
+        if _remember_enabled and enabled is not None:
+            self._param_cache["ic_cfast_enabled"] = enabled
         if gain is not None:
+            if gain < 0 or gain > 32e-12:
+                raise ValueError("IC C-fast gain must be between 0-32 pF.")
             self._param_cache["ic_cfast_gain"] = gain
         if enabled:
-            self.call("set_cc_cfast_gain", c_float(self.get_param("ic_cfast_gain")))
+            self.call("set_cc_cfast_gain", c_int(int(self.get_param("ic_cfast_gain") * 1e12)))
         elif enabled is not None:
-            self.call("set_cc_cfast_gain", c_float(0.0))
+            self.call("set_cc_cfast_gain", c_int(0))
 
     def set_vc_serial_resistance(
         self,
@@ -378,7 +392,6 @@ class UMA(object):
         if prediction_rise_factor is not None:
             self._param_cache["vc_serial_resistance_prediction_rise_factor"] = prediction_rise_factor
             self.call("set_vc_rs_pred_3x_gain", c_bool(prediction_rise_factor == 3))
-            # TODO api call
         if tau is not None:
             self._param_cache["vc_serial_resistance_tau"] = tau
             # TODO api call
@@ -400,7 +413,7 @@ class UMA(object):
         ----------
         enabled : bool|None
         gain : int
-            Gain in Ω, between 0-40 MΩ, with a 1 MΩ step.
+            Gain in Ω, between 0-40 MΩ, with a 1 MΩ resolution.
         _remember_enabled
             Internal use.
         """

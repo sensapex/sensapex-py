@@ -99,10 +99,10 @@ class UMA(object):
             "initial_value": False,
         },
         "vc_cslow_gain": {
-            "initial_value": None,  # todo what is this really?
+            "initial_value": 0,
         },
         "vc_cslow_tau": {
-            "initial_value": None,  # todo what is this really?
+            "initial_value": 0,
         },
         "vc_dac": {
             "initial_value": None,  # todo what's this  # todo what is this really?
@@ -325,6 +325,18 @@ class UMA(object):
                 self.call("set_zap", c_bool(False))  # TODO or `not enabled`?
 
     def set_vc_cslow(self, enabled: bool = None, gain: float = None, tau: float = None, _remember_enabled=True) -> None:
+        """Set the C-slow compensation circuit, only available in voltage-clamp mode.
+
+        Parameters
+        ----------
+        enabled : bool
+        gain : float
+            Gain value in pF, between 0-255 pF, with a 1 pF resolution.
+        tau: float
+            Tau value in µs, between 0-2542.5 µs, with a 9.97 µs resolution.
+        _remember_enabled
+            Internal use.
+        """
         # TODO test this
         if enabled and self.get_clamp_mode() != "VC":
             raise ValueError("cslow compensation cannot be enabled in IC mode")
@@ -332,11 +344,13 @@ class UMA(object):
             self._param_cache["vc_cslow_gain"] = gain
         if tau is not None:
             self._param_cache["vc_cslow_tau"] = tau
-            self.call("set_vc_cslow_tau", c_float(tau))
+        if _remember_enabled and enabled is not None:
+            self._param_cache["vc_cslow_enabled"] = enabled
         if enabled:
             self.call("set_vc_cslow_gain", c_float(self.get_param("vc_cslow_gain")))
+            self.call("set_vc_cslow_tau", c_float(self._param_cache["vc_cslow_tau"]))
         elif enabled is not None:
-            self.call("set_vc_cslow_gain", c_float(0.0))
+            self.call("set_vc_cslow_gain", c_float(0.0))  # it's enough to just set either to 0
 
     def set_vc_cfast(self, enabled: bool = None, gain: float = None, _remember_enabled=True) -> None:
         """Set the C-fast compensation circuit for voltage-clamp mode.
@@ -345,7 +359,7 @@ class UMA(object):
         ----------
         enabled : bool
         gain : float
-            Gain in Farads, between 0-10.875 pF, with a 0.75 pF resolution that starts at 0.375 pF. I.e.: [0, 0.375e-12),
+            Gain in Farads, between 0-10.875 pF, with a 0.75 pF resolution that starts at 0.375 pF. I.e. [0, 0.375e-12),
             [0.375e-12, 1.125e-12), [1.125e-12, 1.875e-12), ...
         _remember_enabled
             Internal use.

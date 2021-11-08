@@ -1,7 +1,5 @@
 import atexit
-
 import faulthandler
-
 import time
 from contextlib import contextmanager
 from ctypes import (
@@ -95,7 +93,7 @@ class UMA(object):
             "initial_value": False,
         },
         "vc_cfast_gain": {
-            "initial_value": None,  # todo what is this really?
+            "initial_value": 0,
         },
         "vc_cslow_enabled": {
             "initial_value": False,
@@ -341,18 +339,33 @@ class UMA(object):
             self.call("set_vc_cslow_gain", c_float(0.0))
 
     def set_vc_cfast(self, enabled: bool = None, gain: float = None, _remember_enabled=True) -> None:
-        # TODO test this. scale.
+        """Set the C-fast compensation circuit for voltage-clamp mode.
+
+        Parameters
+        ----------
+        enabled : bool
+        gain : float
+            Gain in Farads, between 0-10.875 pF, with a 0.75 pF resolution that starts at 0.375 pF. I.e.: [0, 0.375e-12),
+            [0.375e-12, 1.125e-12), [1.125e-12, 1.875e-12), ...
+        _remember_enabled
+            Internal use.
+        """
+        # TODO test this.
         if enabled and self.get_clamp_mode() != "IC":
             raise ValueError("cfast compensation cannot be enabled in VC mode")
         if gain is not None:
+            if gain < 0 or gain > 10.875e-12:
+                raise ValueError("C-fast gain must be between 0-10.875 pF.")
             self._param_cache["vc_cfast_gain"] = gain
+        if _remember_enabled and enabled is not None:
+            self._param_cache["vc_cfast_enabled"] = enabled
         if enabled:
-            self.call("set_vc_cfast_gain", c_float(self.get_param("vc_cfast_gain")))
+            self.call("set_vc_cfast_gain", c_float(self.get_param("vc_cfast_gain") * 1e12))
         elif enabled is not None:
             self.call("set_vc_cfast_gain", c_float(0.0))
 
     def set_ic_cfast(self, enabled: bool = None, gain: float = None, _remember_enabled=True) -> None:
-        """Set current-clamp C-fast compensation circuit.
+        """Set C-fast compensation circuit for current-clamp mode.
 
         Parameters
         ----------
@@ -530,11 +543,13 @@ class UMA(object):
 
     def set_holding_current(self, hold_at: float):
         # TODO only actually call if in the correct mode
-        pass  # TODO uma.call("set_cc_dac", c_int16(vc_dac))
+        # 9-bit
+        pass  # TODO uma.call("set_cc_dac", c_int16(cc_dac))
 
     def set_holding_voltage(self, hold_at: float):
         # TODO only actually call if in the correct mode
-        pass  # TODO uma.call("set_vc_dac", c_int16(vc_dac))
+        # 17-bit
+        pass  # TODO uma.call("set_vc_dac", c_int(vc_dac))
 
     def get_param(self, name):
         # The sdk doesn't provide this feature

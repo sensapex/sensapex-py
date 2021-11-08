@@ -197,7 +197,7 @@ class UMA(object):
         Parameters
         ----------
         stimulus : ndarray
-            Up to 749 points of stimulus, which will be cast to 32-bit integers. The scaling depends on the clamp mode.
+            Stimulus data, which will be cast to 32-bit integers. The scaling depends on the clamp mode.
             For VC, only the bottom 9 bits are usable, not including sign. Values are scaled to ±700mV.
             For IC, only the bottom 17 bits are usable, not including sign. Values are scaled to ±`current_input_range`.
         trigger_sync : bool
@@ -208,7 +208,9 @@ class UMA(object):
         if stimulus.dtype != int:
             raise ValueError("Raw stimulus must be sent as integers.")
         too_big = 2 ** 9 if self.get_clamp_mode() == "VC" else 2 ** 17
-        if np.max(np.abs(stimulus)) > too_big:
+        biggest_val = np.max(np.abs(stimulus))
+        print(f"largest stim val {biggest_val}")
+        if biggest_val > too_big:
             raise ValueError(f"Stimulus values may not exceed ±{too_big}")
         stim_len = stimulus.shape[0]
         stimulus = stimulus.astype(c_int)
@@ -218,10 +220,12 @@ class UMA(object):
             self.call("stimulus", c_int(stim_chunk.shape[0]), c_stim, c_bool(trigger_sync))
 
     def send_stimulus_scaled(self, stimulus: np.ndarray, trigger_sync: bool = False, scale=1):
+        scale /= 2 ** 9 if self.get_clamp_mode() == "VC" else 2 ** 17
         if self.get_clamp_mode() == "VC":
             scale *= 0.7
         else:  # IC
             scale *= self._current_input_range
+        print(f"scaled stim at scale {scale} with max value {np.max(np.abs(stimulus))}")
         self.send_stimulus_raw((stimulus / scale).astype(int), trigger_sync)
 
     def get_clamp_mode(self) -> str:
@@ -296,6 +300,9 @@ class UMA(object):
             self._param_cache["current_input_range"] = current_range
             self.call("set_range", c_int(int(current_range / 1e-12)))  # Convert to int pA first
 
+    def get_current_input_range(self) -> float:
+        return self._param_cache["current_input_range"]
+
     VALID_CURRENT_OUTPUT_RANGES = (3.75e-9, 150e-9)
 
     def set_current_output_range(self, current_range: float):
@@ -307,7 +314,7 @@ class UMA(object):
         # TODO test that this number is working correctly (the header file's boolean and values are seemingly switched)
         self.call("enable_cc_higher_range", c_bool(current_range == 3.75e-9))
 
-    def get_current_output_range(self):
+    def get_current_output_range(self) -> float:
         return self._param_cache["current_output_range"]
 
     def zap(self, enabled: bool = True, duration: float = None):
@@ -356,13 +363,13 @@ class UMA(object):
             self.call("set_cc_cfast_gain", c_float(0.0))
 
     def set_vc_serial_resistance(
-            self,
-            enabled: bool = None,
-            gain: float = None,
-            prediction_rise_factor: Union[Literal[2], Literal[3]] = None,
-            tau: float = None,
-            lag_filter: bool = None,
-            _remember_enabled=True,
+        self,
+        enabled: bool = None,
+        gain: float = None,
+        prediction_rise_factor: Union[Literal[2], Literal[3]] = None,
+        tau: float = None,
+        lag_filter: bool = None,
+        _remember_enabled=True,
     ) -> None:
         if enabled and self.get_clamp_mode() != "VC":
             raise ValueError("serial resistance compensation cannot be enabled in IC mode")
@@ -604,8 +611,9 @@ if __name__ == "__main__":
     # uma.call("set_cc_bridge_gain", c_int(0))
 
     # Stimulus setup
-    N_SAMPLES = 600  # max 749
-    np_stimulus = np.zeros((N_SAMPLES,), dtype=int)
+    N_SAMPLES = 1000
+    np_stim_raw = np.zeros((N_SAMPLES,), dtype=int)
+    np_stim_scaled = np.zeros((N_SAMPLES,), dtype=float)
 
     w = pg.GraphicsLayoutWidget()
     p1 = w.addPlot(row=0, col=0)
@@ -624,40 +632,36 @@ if __name__ == "__main__":
     )
     t_offset = None
 
-
     def handle_raw_recv(received_data):
         global graph_data, t_offset
         t_offset = received_data["ts"][0] if t_offset is None else t_offset
         graph_data = np.roll(graph_data, -len(received_data))
 
-        graph_data[-len(received_data):]["ts"] = (received_data["ts"] - t_offset) * 1e-6
+        graph_data[-len(received_data) :]["ts"] = (received_data["ts"] - t_offset) * 1e-6
         # ±range_of_current pA w.r.t. ground/common
         # read_data[-len(np_buff):]["current"] = (1e-12 * range_of_current / (2 ** 15)) * np_buff["current"]
-        graph_data[-len(received_data):]["current"] = (range_of_current / (2 ** 15)) * (
-                received_data["current"].astype(int) - 2 ** 15
+        graph_data[-len(received_data) :]["current"] = (range_of_current / (2 ** 15)) * (
+            received_data["current"].astype(int) - 2 ** 15
         )
         # ±700 mV w.r.t. ground/common
         # read_data[-len(np_buff):]["voltage"] = np_buff["voltage"] * (0.7 / 2 ** 15)
-        graph_data[-len(received_data):]["voltage"] = (0.7 / 2 ** 15) * (
-                received_data["voltage"].astype(int) - 2 ** 15
+        graph_data[-len(received_data) :]["voltage"] = (0.7 / 2 ** 15) * (
+            received_data["voltage"].astype(int) - 2 ** 15
         )
-        graph_data[-len(received_data):]["status"] = received_data["status"]
-
+        graph_data[-len(received_data) :]["status"] = received_data["status"]
 
     def handle_scaled_recv(received_data):
         global graph_data, t_offset
         t_offset = received_data["ts"][0] if t_offset is None else t_offset
         graph_data = np.roll(graph_data, -len(received_data))
 
-        graph_data[-len(received_data):]["ts"] = received_data["ts"] - t_offset
-        graph_data[-len(received_data):]["current"] = received_data["current"]
-        graph_data[-len(received_data):]["voltage"] = received_data["voltage"]
-        graph_data[-len(received_data):]["status"] = received_data["status"]
-
+        graph_data[-len(received_data) :]["ts"] = received_data["ts"] - t_offset
+        graph_data[-len(received_data) :]["current"] = received_data["current"]
+        graph_data[-len(received_data) :]["voltage"] = received_data["voltage"]
+        graph_data[-len(received_data) :]["status"] = received_data["status"]
 
     uma.add_receive_data_handler_raw(handle_raw_recv)
     uma.start_receiving()
-
 
     def update_plots():
         t = graph_data["ts"]
@@ -665,43 +669,43 @@ if __name__ == "__main__":
         p2.plot(t, graph_data["voltage"], clear=True)
         p3.plot(t, graph_data["status"], clear=True)
 
-
     timer = pg.QtCore.QTimer()
     timer.timeout.connect(update_plots)
     timer.start(10)
 
-
-    def insert_stim(magnitude=30):
-        global np_stimulus
-        np_stimulus[0:-20] = magnitude
-        uma.send_stimulus_raw(np_stimulus, trig)
-
+    def insert_stim(raw=None, scaled=None):
+        global np_stim_raw
+        if raw is None and scaled is None:
+            raw = 30
+        if raw is not None:
+            np_stim_raw[0:-20] = raw
+            uma.send_stimulus_raw(np_stim_raw, trig)
+        else:
+            np_stim_scaled[0:-20] = scaled
+            uma.send_stimulus_scaled(np_stim_scaled)
 
     def stim_train():
         def _do_stims():
-            stim_max = 17 // 2 if uma.get_clamp_mode() == "IC" else 9 // 2
-            for i in range(stim_max):
-                print(f"stimming at 2**{i}")
-                insert_stim((2 ** i))
-                time.sleep(0.1)
-                print(f"stimming at 2**{i}-1")
-                insert_stim((2 ** i) - 1)
+            if uma.get_clamp_mode() == "IC":
+                stim_mag = uma.get_current_input_range()
+                steps = 17
+            else:
+                stim_mag = 0.7
+                steps = 9
+            for i in range(steps):
+                print(f"stimming at {stim_mag} / 2**{i}")
+                insert_stim(scaled=stim_mag / (2 ** i))
             time.sleep(0.1)
-            for i in range(stim_max):
-                print(f"stimming at -2**{i}")
-                insert_stim(-(2 ** i))
-                time.sleep(0.1)
-                print(f"stimming at -2**{i} + 1")
-                insert_stim(-(2 ** i) + 1)
+            for i in range(steps):
+                print(f"stimming at -{stim_mag} / 2**{i}")
+                insert_stim(scaled=-stim_mag / (2 ** i))
                 time.sleep(0.1)
 
         t = Thread(target=_do_stims, daemon=True)
         t.start()
 
-
     stim_timer = pg.QtCore.QTimer()
     stim_timer.timeout.connect(insert_stim)
-
 
     # stim_timer.start(1000)
 
@@ -710,18 +714,14 @@ if __name__ == "__main__":
         stim_timer.stop()
         uma.quit()
 
-
     atexit.register(cleanup)
-
 
     def pause():
         time.sleep(0.1)
         uma.stop_receiving()
 
-
     def unpause():
         uma.start_receiving()
-
 
     def test_stim():
         def _do_test():

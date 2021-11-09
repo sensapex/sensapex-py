@@ -71,9 +71,6 @@ class UMA(object):
         "ic_cfast_gain": {
             "initial_value": 0,
         },
-        "ic_dac": {
-            "initial_value": None,  # todo what's this  # todo what is this really?
-        },
         "clamp_mode": {
             "initial_value": "VC",
         },
@@ -82,6 +79,12 @@ class UMA(object):
         },
         "current_output_range": {
             "initial_value": 150e-9,  # TODO test that this is correct
+        },
+        "holding_current": {
+            "initial_value": 0,
+        },
+        "holding_voltage": {
+            "initial_value": 0,
         },
         "sample_rate": {
             "initial_value": 9776,
@@ -103,9 +106,6 @@ class UMA(object):
         },
         "vc_cslow_tau": {
             "initial_value": 0,
-        },
-        "vc_dac": {
-            "initial_value": None,  # todo what's this  # todo what is this really?
         },
         "vc_serial_resistance_enabled": {
             "initial_value": False,
@@ -141,11 +141,9 @@ class UMA(object):
         self._libuma = uMp.ump.libuma
         self.sensapex = uMp.ump
         self.call("init", uMp.ump.h, c_int(uMp.dev_id))
-        self._current_input_range = 200e-12
         self._param_cache = {name: conf["initial_value"] for name, conf in self.PARAMETERS.items()}
         # TODO how do we track the following initial states: no reset ( and what even is it? )
 
-        self._voltage_range = 700e-3
         self._run_recv_thread = True
         self._pause_recv_thread = True
         self._recv_thread = Thread(target=self._do_recv_forever, daemon=True)
@@ -209,6 +207,7 @@ class UMA(object):
         biggest_val = np.max(np.abs(stimulus))
         print(f"largest stim val {biggest_val}")
         if biggest_val > too_big:
+            # TODO is this too expensive to check?
             raise ValueError(f"Stimulus values may not exceed ±{too_big}")
         stim_len = stimulus.shape[0]
         stimulus = stimulus.astype(c_int)
@@ -218,13 +217,15 @@ class UMA(object):
             self.call("stimulus", c_int(stim_chunk.shape[0]), c_stim, c_bool(trigger_sync))
 
     def send_stimulus_scaled(self, stimulus: np.ndarray, trigger_sync: bool = False, scale=1):
-        scale /= 2 ** 9 if self.get_clamp_mode() == "VC" else 2 ** 17
-        if self.get_clamp_mode() == "VC":
-            scale *= 0.7
-        else:  # IC
-            scale *= self._current_input_range
+        scale = self._adjust_scale_for_input(scale)
         print(f"scaled stim at scale {scale} with max value {np.max(np.abs(stimulus))}")
         self.send_stimulus_raw((stimulus / scale).astype(int), trigger_sync)
+
+    def _adjust_scale_for_input(self, scale=1, as_mode=None):
+        if (as_mode or self.get_clamp_mode()) == "VC":
+            return scale * 0.7 / 2 ** 9
+        else:  # IC
+            return scale * self.get_current_input_range() / 2 ** 17
 
     def get_clamp_mode(self) -> str:
         return self.get_param("clamp_mode")
@@ -331,9 +332,9 @@ class UMA(object):
         ----------
         enabled : bool
         gain : float
-            Gain value in farads, between 0-255 pF, with a 1 pF resolution.
+            Gain value in farads, between 0-255 pF, with a 1 pF precision.
         tau: float
-            Tau value in s, between 0-2542.5 µs, with a 9.97 µs resolution.
+            Tau value in s, between 0-2542.5 µs, with a 9.97 µs precision.
         _remember_enabled
             Internal use.
         """
@@ -359,7 +360,7 @@ class UMA(object):
         ----------
         enabled : bool
         gain : float
-            Gain in farads, between 0-10.875 pF, with a 0.75 pF resolution that starts at 0.375 pF. I.e. [0, 0.375e-12),
+            Gain in farads, between 0-10.875 pF, with a 0.75 pF precision that starts at 0.375 pF. I.e. [0, 0.375e-12),
             [0.375e-12, 1.125e-12), [1.125e-12, 1.875e-12), ...
         _remember_enabled
             Internal use.
@@ -385,7 +386,7 @@ class UMA(object):
         ----------
         enabled : bool
         gain : float
-            Gain in farads, between 0-31.875 pF, with a 1 pF resolution.
+            Gain in farads, between 0-31.875 pF, with a 1 pF precision.
         _remember_enabled
             Internal use
         """
@@ -412,15 +413,15 @@ class UMA(object):
         lag_filter: bool = None,
         _remember_enabled=True,
     ) -> None:
-        """
+        """Set the serial resistance compensation circuit in voltage-clamp mode.
 
         Parameters
         ----------
         enabled : bool
         gain : float
-            Gain value in Ω, between 0-25.3125 MΩ, with a 99.3 kΩ resolution.
+            Gain value in Ω, between 0-25.3125 MΩ, with a 99.3 kΩ precision.
         tau : float
-            Tau value in seconds, between 0-768 µs, with a 3 µs resolution.
+            Tau value in seconds, between 0-768 µs, with a 3 µs precision.
         prediction_rise_factor : int
             2 or 3.
         lag_filter : bool
@@ -437,11 +438,11 @@ class UMA(object):
             self._param_cache["vc_serial_resistance_prediction_rise_factor"] = prediction_rise_factor
         if tau is not None:
             self._param_cache["vc_serial_resistance_tau"] = tau
-            # TODO api call
         if lag_filter is not None:
             self._param_cache["vc_serial_resistance_lag_filter"] = lag_filter
         if _remember_enabled and enabled is not None:
             self._param_cache["vc_serial_resistance_enabled"] = enabled
+
         if enabled:
             enable_3x_gain = c_bool(self._param_cache["vc_serial_resistance_prediction_rise_factor"] == 3)
             self.call("set_vc_rs_pred_3x_gain", enable_3x_gain)
@@ -459,7 +460,7 @@ class UMA(object):
         ----------
         enabled : bool|None
         gain : int
-            Gain in Ω, between 0-40 MΩ, with a 1 MΩ resolution.
+            Gain in Ω, between 0-40 MΩ, with a 1 MΩ precision.
         _remember_enabled
             Internal use.
         """
@@ -575,14 +576,37 @@ class UMA(object):
         return self.get_param("holding_voltage")
 
     def set_holding_current(self, hold_at: float):
-        # TODO only actually call if in the correct mode
-        # 9-bit
-        pass  # TODO uma.call("set_cc_dac", c_int16(cc_dac))
+        """Set the holding current in current-clamp mode.
+
+        Parameters
+        ----------
+        hold_at : float
+            The holding current in amps, between ±``get_current_input_range()``, with 17 bits of precision.
+        """
+        # TODO test
+        if abs(hold_at) > self.get_current_input_range():
+            raise ValueError(f"Requested holding current of {hold_at} is outside the current input range of"
+                             f" ±{self.get_current_input_range()}")
+        self._param_cache["hosting_current"] = hold_at
+        scaled_current = self._param_cache["hosting_current"] / self._adjust_scale_for_input(as_mode="IC")
+        self.call("set_cc_dac", c_int(int(scaled_current)))
+        # todo test that can I set this safely when in the wrong mode
 
     def set_holding_voltage(self, hold_at: float):
-        # TODO only actually call if in the correct mode
-        # 17-bit
-        pass  # TODO uma.call("set_vc_dac", c_int(vc_dac))
+        """Set the holding voltage in voltage-clamp mode.
+
+        Parameters
+        ----------
+        hold_at : float
+            The holding voltage in volts, between ±700mV, with 1.37 mV precision.
+        """
+        # TODO test
+        if abs(hold_at) > 0.7:
+            raise ValueError(f"Requested holding voltage of {hold_at} is outside the voltage input range of ±0.7")
+        self._param_cache["hosting_voltage"] = hold_at
+        scaled_voltage = self._param_cache["hosting_voltage"] / self._adjust_scale_for_input(as_mode="VC")
+        self.call("set_vc_dac", c_int(scaled_voltage))
+        # todo test that can I set this safely when in the wrong mode
 
     def get_param(self, name):
         # The sdk doesn't provide this feature

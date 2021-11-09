@@ -587,9 +587,10 @@ class UMA(object):
         if abs(hold_at) > self.get_current_input_range():
             raise ValueError(f"Requested holding current of {hold_at} is outside the current input range of"
                              f" ±{self.get_current_input_range()}")
-        self._param_cache["hosting_current"] = hold_at
-        scaled_current = self._param_cache["hosting_current"] / self._adjust_scale_for_input(as_mode="IC")
-        self.call("set_cc_dac", c_int(int(scaled_current)))
+        self._param_cache["holding_current"] = hold_at
+        scaled_current = self._param_cache["holding_current"] / self._adjust_scale_for_input(as_mode="IC")
+        with self.pause_receiving():
+            self.call("set_cc_dac", c_int(int(scaled_current)))
         # todo test that can I set this safely when in the wrong mode
 
     def set_holding_voltage(self, hold_at: float):
@@ -603,9 +604,10 @@ class UMA(object):
         # TODO test
         if abs(hold_at) > 0.7:
             raise ValueError(f"Requested holding voltage of {hold_at} is outside the voltage input range of ±0.7")
-        self._param_cache["hosting_voltage"] = hold_at
-        scaled_voltage = self._param_cache["hosting_voltage"] / self._adjust_scale_for_input(as_mode="VC")
-        self.call("set_vc_dac", c_int(scaled_voltage))
+        self._param_cache["holding_voltage"] = hold_at
+        scaled_voltage = self._param_cache["holding_voltage"] / self._adjust_scale_for_input(as_mode="VC")
+        with self.pause_receiving():
+            self.call("set_vc_dac", c_int(int(scaled_voltage)))
         # todo test that can I set this safely when in the wrong mode
 
     def get_param(self, name):

@@ -122,7 +122,7 @@ class UMA(object):
             "initial_value": 0,
         },
         "vc_voltage_offset": {
-            "initial_value": None,  # todo what is this really?
+            "initial_value": None,  # todo this isn't initialized, so it's probably 0x0, which translates to -50mV?
         },
         "receive_waits_for_trigger": {  # todo how do we best support this
             "initial_value": None,  # todo what is this really?
@@ -385,7 +385,7 @@ class UMA(object):
         ----------
         enabled : bool
         gain : float
-            Gain in farads, between 0-31.875 pF, with a 1 pF precision.
+            Gain in farads, between 0-31.875 pF, with a 0.125 pF precision.
         _remember_enabled
             Internal use
         """
@@ -395,7 +395,7 @@ class UMA(object):
         if _remember_enabled and enabled is not None:
             self._param_cache["ic_cfast_enabled"] = enabled
         if gain is not None:
-            if gain < 0 or gain > 32e-12:
+            if gain < 0 or gain > 31.875e-12:
                 raise ValueError("IC C-fast gain must be between 0-32 pF.")
             self._param_cache["ic_cfast_gain"] = gain
         if enabled:
@@ -457,9 +457,9 @@ class UMA(object):
 
         Parameters
         ----------
-        enabled : bool|None
+        enabled : bool
         gain : int
-            Gain in Ω, between 0-40 MΩ, with a 1 MΩ precision.
+            Gain in Ω, between 0-40 MΩ, with a 0.16 MΩ precision.
         _remember_enabled
             Internal use.
         """
@@ -623,10 +623,17 @@ class UMA(object):
     def set_param(self, param, value):
         pass  # TODO
 
-    def set_vc_voltage_offset(self, offset):
-        # TODO scale, test
+    def set_vc_voltage_offset(self, offset: float):
+        """
+
+        Parameters
+        ----------
+        offset : float
+            Voltage offset, between ±50mV, with a 97µV precision.
+        """
+        # TODO test
         with self.pause_receiving():
-            self.call("set_vc_voltage_offset", c_float(offset))
+            self.call("set_vc_voltage_offset", c_float(offset * 1e3))
 
 
 if __name__ == "__main__":

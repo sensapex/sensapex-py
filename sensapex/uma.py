@@ -7,7 +7,6 @@ from ctypes import (
     c_uint32,
     c_uint8,
     POINTER,
-    c_int16,
     Structure,
     c_int,
     c_uint16,
@@ -634,7 +633,7 @@ if __name__ == "__main__":
     UMP.set_debug_mode(True)
     um = UMP.get_ump()
 
-    # LIBUM_SHARED_EXPORT int um_set_feature(um_state *hndl, const int dev, const int id, const int value);
+    # # LIBUM_SHARED_EXPORT int um_set_feature(um_state *hndl, const int dev, const int id, const int value);
     # um.call("um_set_feature", 1, 13, 1)
     # print(f"feature 13: {um.call('um_get_feature', 1, 13)}")
     # sleep(5)
@@ -644,58 +643,29 @@ if __name__ == "__main__":
     dev1 = um.get_device(1)
     uma = UMA(dev1)
 
-    # _uma_lib = cdll.LoadLibrary("/home/martin/src/acq4/uma-sdk/src/lib/libuma.so")
-    dev_array = (c_int * LIBUM_MAX_DEVS)()
-    # _uma_lib.uma_get_device_list.restype = c_int
-    # init_ret = _uma_lib.uma_init", handle, c_int(1))
-    n_devs = uma.call("get_device_list", byref(dev_array), c_int(LIBUM_MAX_MANIPULATORS))
-    if n_devs >= 0:
-        print([dev_array[i] for i in range(n_devs)])
+    # dev_array = (c_int * LIBUM_MAX_DEVS)()
+    # # _uma_lib.uma_get_device_list.restype = c_int
+    # # init_ret = _uma_lib.uma_init", handle, c_int(1))
+    # n_devs = uma.call("get_device_list", byref(dev_array), c_int(LIBUM_MAX_MANIPULATORS))
+    # if n_devs >= 0:
+    #     print([dev_array[i] for i in range(n_devs)])
 
     range_of_current = 20000e-12
     read_sample_rate = 9776
 
     uma.set_current_input_range(range_of_current)
+    uma.set_current_output_range(150e-9)
     uma.set_sample_rate(read_sample_rate)
-    uma.set_clamp_mode("VC")
 
-    # Set VC output
-    # ±500 mV w.r.t. Vcm
-    #  1 mV (10-bit DAC)
-    #  * @brief Set output voltage, 9 bits DAC at 9 lower bits, sign at bit 10, trig at bit 11
-    vc_output = 0  # V
     trig = True
-    vc_dac = int(2 ** 8 * abs(vc_output) / 0.5) | (0 if vc_output >= 0 else 2 ** 9) | (0 if not trig else 2 ** 11)
-    uma.call("set_vc_dac", c_int16(vc_dac))
-
     uma.call("set_trig_bit", c_bool(trig))  # TODO what does this do?
     uma.call("set_wait_trig", c_bool(False))
 
-    # Amplifier correction parameters
-    voltage_offset = 0
-
-    # units: mV
-    uma.set_vc_voltage_offset(voltage_offset)
-
-    # uma.call("set_vc_cfast_gain", c_float(value))
-    # uma.call("set_vc_cslow_gain", c_float(value))
-    # uma.call("set_vc_cslow_tau", c_float(value))
-
-    uma.call("set_vc_rs_corr_gain", c_float(0))
-    # uma.call("set_vc_rs_corr_tau", c_float(value))
-
-    # uma.call("enable_vc_rs_fast_lag_filter", c_bool(value))
-
-    uma.call("enable_vc_rs_pred_3x_gain", c_bool(False))
-
-    # ±100 nA or ±2.5 nA CC command range
-    uma.call("enable_cc_higher_range", c_bool(False))
-
-    # 17 bit DAC; range set by enable_cc_higher_range
-    uma.call("set_cc_dac", c_int(0))
-
-    # uma.call("set_cc_cfast_gain", c_int(value))
-    # uma.call("set_cc_bridge_gain", c_int(0))
+    uma.set_clamp_mode("VC")
+    uma.set_vc_voltage_offset(0)
+    uma.set_vc_cfast(False)
+    uma.set_vc_cslow(False)
+    uma.set_vc_serial_resistance(False)
 
     # Stimulus setup
     N_SAMPLES = 1000
@@ -715,7 +685,7 @@ if __name__ == "__main__":
     w.show()
 
     graph_data = np.zeros(
-        int(5.0 * read_sample_rate), dtype=[("ts", float), ("current", float), ("voltage", float), ("status", int)]
+        int(5 * read_sample_rate), dtype=[("ts", float), ("current", float), ("voltage", float), ("status", int)]
     )
     t_offset = None
 
@@ -737,17 +707,27 @@ if __name__ == "__main__":
         )
         graph_data[-len(received_data) :]["status"] = received_data["status"]
 
-    def handle_scaled_recv(received_data):
+    def handle_scaled_ts_recv(received_data):
         global graph_data, t_offset
-        t_offset = received_data["ts"][0] if t_offset is None else t_offset
+        t_offset = received_data[0] if t_offset is None else t_offset
         graph_data = np.roll(graph_data, -len(received_data))
 
-        graph_data[-len(received_data) :]["ts"] = received_data["ts"] - t_offset
-        graph_data[-len(received_data) :]["current"] = received_data["current"]
-        graph_data[-len(received_data) :]["voltage"] = received_data["voltage"]
-        graph_data[-len(received_data) :]["status"] = received_data["status"]
+        graph_data[-len(received_data) :]["ts"] = received_data - t_offset
 
-    uma.add_receive_data_handler_raw(handle_raw_recv)
+    def handle_scaled_current_recv(received_data):
+        graph_data[-len(received_data) :]["current"] = received_data
+
+    def handle_scaled_voltage_recv(received_data):
+        graph_data[-len(received_data) :]["voltage"] = received_data
+
+    def handle_scaled_status_recv(received_data):
+        graph_data[-len(received_data) :]["status"] = received_data
+
+    # uma.add_receive_data_handler_raw(handle_raw_recv)
+    uma.add_receive_data_handler_scaled(handle_scaled_ts_recv, "ts")
+    uma.add_receive_data_handler_scaled(handle_scaled_current_recv, "current")
+    uma.add_receive_data_handler_scaled(handle_scaled_voltage_recv, "voltage")
+    uma.add_receive_data_handler_scaled(handle_scaled_status_recv, "status")
     uma.start_receiving()
 
     def update_plots():
@@ -774,26 +754,23 @@ if __name__ == "__main__":
     def stim_train():
         def _do_stims():
             if uma.get_clamp_mode() == "IC":
-                stim_mag = uma.get_current_input_range()
+                max_stim = uma.get_current_input_range()
                 steps = 17
             else:
-                stim_mag = 0.7
+                max_stim = 0.7
                 steps = 9
             for i in range(steps):
-                print(f"stimming at {stim_mag} / 2**{i}")
-                insert_stim(scaled=stim_mag / (2 ** i))
+                insert_stim(scaled=max_stim / (2 ** i))
             time.sleep(0.1)
             for i in range(steps):
-                print(f"stimming at -{stim_mag} / 2**{i}")
-                insert_stim(scaled=-stim_mag / (2 ** i))
+                insert_stim(scaled=-max_stim / (2 ** i))
                 time.sleep(0.1)
 
         t = Thread(target=_do_stims, daemon=True)
         t.start()
 
     stim_timer = pg.QtCore.QTimer()
-    stim_timer.timeout.connect(insert_stim)
-
+    # stim_timer.timeout.connect()
     # stim_timer.start(1000)
 
     def cleanup():

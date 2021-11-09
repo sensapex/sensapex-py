@@ -111,16 +111,16 @@ class UMA(object):
             "initial_value": False,
         },
         "vc_serial_resistance_gain": {
-            "initial_value": None,  # todo what is this really?
+            "initial_value": 0,
         },
         "vc_serial_resistance_lag_filter": {
-            "initial_value": None,  # todo what is this really?
+            "initial_value": False,
         },
         "vc_serial_resistance_prediction_rise_factor": {
             "initial_value": 2,
         },
         "vc_serial_resistance_tau": {
-            "initial_value": None,  # todo what is this really?
+            "initial_value": 0,
         },
         "vc_voltage_offset": {
             "initial_value": None,  # todo what is this really?
@@ -331,15 +331,15 @@ class UMA(object):
         ----------
         enabled : bool
         gain : float
-            Gain value in pF, between 0-255 pF, with a 1 pF resolution.
+            Gain value in farads, between 0-255 pF, with a 1 pF resolution.
         tau: float
-            Tau value in µs, between 0-2542.5 µs, with a 9.97 µs resolution.
+            Tau value in s, between 0-2542.5 µs, with a 9.97 µs resolution.
         _remember_enabled
             Internal use.
         """
         # TODO test this
         if enabled and self.get_clamp_mode() != "VC":
-            raise ValueError("cslow compensation cannot be enabled in IC mode")
+            raise ValueError("C-slow compensation cannot be enabled in IC mode")
         if gain is not None:
             self._param_cache["vc_cslow_gain"] = gain
         if tau is not None:
@@ -359,7 +359,7 @@ class UMA(object):
         ----------
         enabled : bool
         gain : float
-            Gain in Farads, between 0-10.875 pF, with a 0.75 pF resolution that starts at 0.375 pF. I.e. [0, 0.375e-12),
+            Gain in farads, between 0-10.875 pF, with a 0.75 pF resolution that starts at 0.375 pF. I.e. [0, 0.375e-12),
             [0.375e-12, 1.125e-12), [1.125e-12, 1.875e-12), ...
         _remember_enabled
             Internal use.
@@ -385,7 +385,7 @@ class UMA(object):
         ----------
         enabled : bool
         gain : float
-            Gain in Farads, between 0-31.875 pF, with a 1 pF resolution.
+            Gain in farads, between 0-31.875 pF, with a 1 pF resolution.
         _remember_enabled
             Internal use
         """
@@ -407,31 +407,50 @@ class UMA(object):
         self,
         enabled: bool = None,
         gain: float = None,
-        prediction_rise_factor: Union[Literal[2], Literal[3]] = None,
         tau: float = None,
+        prediction_rise_factor: Union[Literal[2], Literal[3]] = None,
         lag_filter: bool = None,
         _remember_enabled=True,
     ) -> None:
+        """
+
+        Parameters
+        ----------
+        enabled : bool
+        gain : float
+            Gain value in Ω, between 0-25.3125 MΩ, with a 99.3 kΩ resolution.
+        tau : float
+            Tau value in seconds, between 0-768 µs, with a 3 µs resolution.
+        prediction_rise_factor : int
+            2 or 3.
+        lag_filter : bool
+        _remember_enabled
+            Internal use.
+        """
         if enabled and self.get_clamp_mode() != "VC":
-            raise ValueError("serial resistance compensation cannot be enabled in IC mode")
+            raise ValueError("Serial resistance compensation cannot be enabled in IC mode")
+        if enabled and self.get_current_input_range() == 200e-12:
+            raise ValueError("Serial resistance does not function at ±200e-12 input range")
         if gain is not None:
             self._param_cache["vc_serial_resistance_gain"] = gain
         if prediction_rise_factor is not None:
             self._param_cache["vc_serial_resistance_prediction_rise_factor"] = prediction_rise_factor
-            self.call("set_vc_rs_pred_3x_gain", c_bool(prediction_rise_factor == 3))
         if tau is not None:
             self._param_cache["vc_serial_resistance_tau"] = tau
             # TODO api call
         if lag_filter is not None:
             self._param_cache["vc_serial_resistance_lag_filter"] = lag_filter
-            # TODO api call
         if _remember_enabled and enabled is not None:
             self._param_cache["vc_serial_resistance_enabled"] = enabled
         if enabled:
-            self.call("set_vc_rs_corr_gain", c_int(self.get_param("vc_serial_resistance_gain")))
+            enable_3x_gain = c_bool(self._param_cache["vc_serial_resistance_prediction_rise_factor"] == 3)
+            self.call("set_vc_rs_pred_3x_gain", enable_3x_gain)
+            self.call("set_vc_rs_fast_lag_filter", c_bool(self._param_cache["vc_serial_resistance_lag_filter"]))
+            self.call("set_vc_rs_corr_tau", c_float(self.get_param("vc_serial_resistance_tau") * 1e6))
+            self.call("set_vc_rs_corr_gain", c_float(self.get_param("vc_serial_resistance_gain") / 1e6))
         elif enabled is not None:
-            self.call("set_vc_rs_corr_gain", c_int(0))
-        # TODO scale, testing
+            self.call("set_vc_rs_corr_gain", c_float(0))
+        # TODO testing
 
     def set_ic_bridge(self, enabled: bool = None, gain: int = None, _remember_enabled=True):
         """In current-clamp mode, set the bridge compensation circuit.

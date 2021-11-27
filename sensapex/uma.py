@@ -21,8 +21,10 @@ import numpy as np
 from typing_extensions import Literal
 
 import pyqtgraph as pg
+from pyqtgraph import mkQApp
+from pyqtgraph.parametertree import ParameterTree, Parameter
 from sensapex import SensapexDevice, UMError
-from sensapex.sensapex import um_state, UMP, LIBUM_MAX_MANIPULATORS, LIBUM_TIMEOUT
+from sensapex.sensapex import um_state, UMP, LIBUM_TIMEOUT
 
 faulthandler.enable()
 
@@ -535,7 +537,7 @@ class UMA(object):
             self._recv_handlers.append((column, handler, None))
 
     def add_receive_data_handler_scaled(self, handler, column: str, scale=1):
-        """TODO"""
+        """TODO maybe wrap the incoming data in an object that can handle the scaling so that column is no longer required"""
         if column == "ts":
             scale *= 1e-6
         elif column == "voltage":
@@ -584,8 +586,10 @@ class UMA(object):
         """
         # TODO test
         if abs(hold_at) > self.get_current_input_range():
-            raise ValueError(f"Requested holding current of {hold_at} is outside the current input range of"
-                             f" ±{self.get_current_input_range()}")
+            raise ValueError(
+                f"Requested holding current of {hold_at} is outside the current input range of"
+                f" ±{self.get_current_input_range()}"
+            )
         self._param_cache["holding_current"] = hold_at
         scaled_current = self._param_cache["holding_current"] / self._adjust_scale_for_input(as_mode="IC")
         with self.pause_receiving():
@@ -646,7 +650,7 @@ if __name__ == "__main__":
     # sleep(5)
     # print(f"feature 13: {um.call('um_get_feature', 1, 13)}")
 
-    print(um.list_devices())
+    # print(um.list_devices())
     dev1 = um.get_device(1)
     uma = UMA(dev1)
 
@@ -679,20 +683,82 @@ if __name__ == "__main__":
     np_stim_raw = np.zeros((N_SAMPLES,), dtype=int)
     np_stim_scaled = np.zeros((N_SAMPLES,), dtype=float)
 
-    w = pg.GraphicsLayoutWidget()
-    p1 = w.addPlot(row=0, col=0)
-    p2 = w.addPlot(row=1, col=0)
-    p3 = w.addPlot(row=2, col=0)
+    def on_param_change(param, changes):
+        uma.stop_receiving()
+        uma.set_clamp_mode(param["mode"])
+        uma.set_holding_current(param["holding current"])
+        uma.set_holding_voltage(param["holding voltage"])
+        if param["run"]:
+            uma.start_receiving()
+
+    app = mkQApp()
+    win = pg.QtWidgets.QSplitter(pg.Qt.QtCore.Qt.Horizontal)
+    p = Parameter.create(
+        name="params",
+        type="group",
+        children=[
+            {"name": "mode", "type": "list", "values": ["IC", "VC"], "value": uma.get_clamp_mode()},
+            {
+                "name": "holding current",
+                "type": "float",
+                "siPrefix": True,
+                "dec": True,
+                "step": 0.5,
+                "minStep": 1e-12,
+                "suffix": "A",
+                "value": uma.get_holding_current(),
+            },
+            {
+                "name": "holding voltage",
+                "type": "float",
+                "siPrefix": True,
+                "dec": True,
+                "step": 0.5,
+                "minStep": 1e-3,
+                "suffix": "V",
+                "value": uma.get_holding_voltage(),
+            },
+            {
+                "name": "add stim",
+                "type": "action",
+            },
+            {
+                "name": "run",
+                "type": "bool",
+                "value": True,
+            },
+        ],
+    )
+    p.sigTreeStateChanged.connect(on_param_change)
+
+    ptree = ParameterTree()
+    ptree.setParameters(p, showTop=False)
+    win.addWidget(ptree)
+
+    plot_area = pg.GraphicsLayoutWidget()
+    p1 = plot_area.addPlot(row=0, col=0)
+    p2 = plot_area.addPlot(row=1, col=0)
+    p3 = plot_area.addPlot(row=2, col=0)
     p1.setLabels(left=("current", "A"))
     p2.setLabels(left=("voltage", "V"))
     p2.setXLink(p1)
     p3.setLabels(bottom=("time", "s"), left="status")
     p3.setXLink(p1)
 
-    w.show()
+    win.addWidget(plot_area)
+
+    win.show()
 
     graph_data = np.zeros(
-        int(5 * read_sample_rate), dtype=[("ts", float), ("current", float), ("voltage", float), ("status", int)]
+        int(5 * read_sample_rate),
+        dtype=[
+            ("ts", float),
+            ("current", float),
+            ("current_expected", float),
+            ("voltage", float),
+            ("voltage_expected", float),
+            ("status", int),
+        ],
     )
     t_offset = None
 
@@ -720,6 +786,8 @@ if __name__ == "__main__":
         graph_data = np.roll(graph_data, -len(received_data))
 
         graph_data[-len(received_data) :]["ts"] = received_data - t_offset
+        graph_data[-len(received_data) :]["current_expected"] = uma.get_holding_current()
+        graph_data[-len(received_data) :]["voltage_expected"] = uma.get_holding_voltage()
 
     def handle_scaled_current_recv(received_data):
         graph_data[-len(received_data) :]["current"] = received_data
@@ -741,6 +809,10 @@ if __name__ == "__main__":
         t = graph_data["ts"]
         p1.plot(t, graph_data["current"], clear=True)
         p2.plot(t, graph_data["voltage"], clear=True)
+        if uma.get_clamp_mode() == "IC":
+            p1.plot(t, graph_data["current_expected"], pen="r")
+        else:
+            p2.plot(t, graph_data["voltage_expected"], pen="r")
         p3.plot(t, graph_data["status"], clear=True)
 
     timer = pg.QtCore.QTimer()
@@ -775,8 +847,10 @@ if __name__ == "__main__":
 
         t = Thread(target=_do_stims, daemon=True)
         t.start()
+    p.child("add stim").sigActivated.connect(stim_train)
 
     stim_timer = pg.QtCore.QTimer()
+
     # stim_timer.timeout.connect()
     # stim_timer.start(1000)
 
@@ -799,7 +873,7 @@ if __name__ == "__main__":
             global timer, stim_timer, graph_data
             start_ts = graph_data["ts"][-1]
             print(f"latest timestamp on a sample at start stim {start_ts}")
-            insert_stim(2 ** 9)
+            insert_stim(2 ** 9)  # todo broken
             print("sleeping")
             time.sleep(2)
             local_read_data = graph_data.copy()

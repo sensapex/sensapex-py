@@ -14,6 +14,7 @@ from ctypes import (
     c_ulong,
     c_short,
     c_ushort,
+    c_int16,
     c_byte,
     c_void_p,
     c_char,
@@ -354,6 +355,8 @@ class UMP(object):
         self.lib = self.load_lib("libum")
         self.lib.um_errorstr.restype = c_char_p
         self.libuma = self.load_lib("libuma")
+
+        self.libuma.uma_set_vc_dac.argtypes = [c_void_p, c_int16]
 
         self._debug = self._debug_at_cls
         self._debug_dir = "sensapex-debug"

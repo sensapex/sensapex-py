@@ -1,6 +1,7 @@
 import atexit
 import faulthandler
 import time
+from concurrent.futures import Future
 from contextlib import contextmanager
 from ctypes import (
     byref,
@@ -9,13 +10,14 @@ from ctypes import (
     POINTER,
     Structure,
     c_int,
+    c_int16,
     c_uint16,
     c_bool,
     sizeof,
     c_float,
 )
-from threading import Thread
-from typing import Union, Iterable, Dict, List, Any, Tuple
+from threading import Thread, RLock, Event
+from typing import Union, Iterable, Dict, List, Callable
 
 import numpy as np
 from typing_extensions import Literal
@@ -52,10 +54,52 @@ class _uma_capture_struct(Structure):
     ]
 
 
+class ReceivedData:
+    def __init__(self, uma: "UMA", data: np.ndarray):
+        self._uma = uma
+        self._output_current_range = uma.get_current_output_range()
+        self._data = data
+        self._float_cast_data = {}
+
+    def __len__(self):
+        return len(self._data)
+
+    def get_raw_status(self) -> np.ndarray:
+        return self._data["status"]
+
+    def get_raw_flags(self) -> np.ndarray:
+        return self._data["flags"]
+
+    def get_raw_index(self) -> np.ndarray:
+        return self._data["index"]
+
+    def get_raw_voltage(self) -> np.ndarray:
+        return self._data["voltage"]
+
+    def get_scaled_voltage(self, scale=1) -> np.ndarray:
+        if "voltage" not in self._float_cast_data:
+            self._float_cast_data["voltage"] = self._data["voltage"].astype(float)
+        return self._float_cast_data["voltage"] * (scale * 0.7 / (2 ** 15))
+
+    def get_raw_current(self) -> np.ndarray:
+        return self._data["current"]
+
+    def get_scaled_current(self, scale=1) -> np.ndarray:
+        if "current" not in self._float_cast_data:
+            self._float_cast_data["current"] = self._data["current"].astype(float)
+        return self._float_cast_data["current"] * (scale * self._output_current_range / (2 ** 15))
+
+    def get_raw_time(self) -> np.ndarray:
+        return self._data["ts"]
+
+    def get_scaled_time(self, scale=1) -> np.ndarray:
+        if "ts" not in self._float_cast_data:
+            self._float_cast_data["ts"] = self._data["ts"].astype(float)
+        return self._float_cast_data["ts"] * (scale * 1e-6)
+
+
 class UMA(object):
     """Class representing a uMa device ( itself attached to a uMp )"""
-
-    _recv_handlers: List[Tuple[Union[str, None], Any, Any]]
 
     UMA_CAPTURES_PER_PACKET = 1440 // sizeof(_uma_capture_struct)
 
@@ -136,9 +180,9 @@ class UMA(object):
 
     def __init__(self, uMp: SensapexDevice):
         # TODO should we enforce only making one of these per device
-        self._recv_handlers = []
+        self.lock = RLock()
+        self._recv_handlers: List[Callable[[ReceivedData], None]] = []
         self._state = _uma_state_struct()
-        self._lock = uMp.ump.lock
         self._libuma = uMp.ump.libuma
         self.sensapex = uMp.ump
         self.call("init", uMp.ump.h, c_int(uMp.dev_id))
@@ -152,19 +196,12 @@ class UMA(object):
         self._recv_buffer = (_uma_capture_struct * self.UMA_CAPTURES_PER_PACKET)()
         self._np_recv_buffer = np.frombuffer(
             self._recv_buffer,
-            dtype=[
-                ("status", c_uint8),
-                ("flags", c_uint8),
-                ("index", c_uint16),
-                ("ts", c_uint32),
-                ("current", c_uint16),
-                ("voltage", c_uint16),
-            ],
+            dtype=_uma_capture_struct._fields_,
         )
 
     def call(self, fn_name: str, *args) -> int:
         """
-        Make a raw call to a uMa function in the C API.
+        Make a call to a uMa function in the C API.
 
         Parameters
         ----------
@@ -493,16 +530,10 @@ class UMA(object):
                 else:
                     raise e
             else:
-                float_cast_data = {}
-                for column, handler, scale in self._recv_handlers:
-                    if column is None:
-                        handler(self._np_recv_buffer)
-                    elif scale is None:
-                        handler(self._np_recv_buffer[column])
-                    else:
-                        if column not in float_cast_data:
-                            float_cast_data[column] = self._np_recv_buffer[column].astype(float)
-                        handler(float_cast_data[column] * scale)  # 0.7 / 2**9
+                data = ReceivedData(self, self._np_recv_buffer.copy())
+                # TODO is this too slow? does it need to be threaded?
+                for handler in self._recv_handlers:
+                    handler(data)
 
     def start_receiving(self):
         """
@@ -516,41 +547,19 @@ class UMA(object):
         self._pause_recv_thread = True
         self.call("stop")
 
-    def add_receive_data_handler_raw(self, handler, column: str = None):
+    def add_receive_data_handler(self, handler: Callable[[ReceivedData], None]):
         """
-            TODO mention scaled methods, removal
-
         Parameters
         ----------
         handler
-            This callable should accept a single ndarray argument with a data type that mirrors `_uma_capture_struct` or
-            one of its columns (if the `column` parameter is set). Data domains and ranges of this object will vary.
-            "voltage" will be `±2**9 -> ±700mV`. "current" will be `±2**17 -> ±self.current_range`. "ts" (which stands
-            for "timestamp") will be `µs`.
-        column : str
-            If set, this specifies that only one column of the data will be passed to the handler (e.g. "voltage").
+            This callable should accept a ReceivedData argument. It will be run in the inner loop of data receiving, so
+            try not to do anything too expensive.
         """
-        valid_columns = self._np_recv_buffer.dtype.names
-        if column is not None and column not in valid_columns:
-            raise ValueError(f"'{column}' is not a valid column name for captured data. Choose from {valid_columns}")
-        with self._lock:
-            self._recv_handlers.append((column, handler, None))
+        self._recv_handlers.append(handler)
 
-    def add_receive_data_handler_scaled(self, handler, column: str, scale=1):
-        """TODO maybe wrap the incoming data in an object that can handle the scaling so that column is no longer required"""
-        if column == "ts":
-            scale *= 1e-6
-        elif column == "voltage":
-            scale *= 0.7 / (2 ** 15)
-        elif column == "current":
-            scale *= self.get_current_output_range() / (2 ** 15)
-        with self._lock:
-            self._recv_handlers.append((column, handler, scale))
-
-    def remove_receive_data_handler(self, handler, column=None):
-        """ TODO """
-        with self._lock:
-            self._recv_handlers = [(c, h, s) for c, h, s in self._recv_handlers if h != handler and c != column]
+    def remove_receive_data_handler(self, handler):
+        """ TODO do we need a mutex on this? """
+        self._recv_handlers = [h for h in self._recv_handlers if h != handler]
 
     def quit(self):
         """TODO"""
@@ -609,8 +618,10 @@ class UMA(object):
             raise ValueError(f"Requested holding voltage of {hold_at} is outside the voltage input range of ±0.7")
         self._param_cache["holding_voltage"] = hold_at
         scaled_voltage = self._param_cache["holding_voltage"] / self._adjust_scale_for_input(as_mode="VC")
+        int_voltage = c_int16(int(scaled_voltage))
+        print("set holding:", hold_at, int_voltage)
         with self.pause_receiving():
-            self.call("set_vc_dac", c_int(int(scaled_voltage)))
+            self.call("set_vc_dac", int_voltage)
         # todo test that can I set this safely when in the wrong mode
 
     def get_param(self, name):
@@ -638,6 +649,17 @@ class UMA(object):
         # TODO test
         with self.pause_receiving():
             self.call("set_vc_voltage_offset", c_float(offset * 1e3))
+
+    def get_sample_rate(self) -> int:
+        return self._param_cache["sample_rate"]
+
+    def auto_cap_compensation(self):
+        pass
+
+    def set_params(self, parameters):
+        with self.pause_receiving():
+            for name, value in parameters:
+                self.set_param(name, value)
 
 
 if __name__ == "__main__":
@@ -688,6 +710,7 @@ if __name__ == "__main__":
         uma.set_clamp_mode(param["mode"])
         uma.set_holding_current(param["holding current"])
         uma.set_holding_voltage(param["holding voltage"])
+        uma.set_vc_voltage_offset(param["voltage offset"])
         if param["run"]:
             uma.start_receiving()
 
@@ -697,6 +720,11 @@ if __name__ == "__main__":
         name="params",
         type="group",
         children=[
+            {
+                "name": "run",
+                "type": "bool",
+                "value": True,
+            },
             {"name": "mode", "type": "list", "values": ["IC", "VC"], "value": uma.get_clamp_mode()},
             {
                 "name": "holding current",
@@ -719,14 +747,23 @@ if __name__ == "__main__":
                 "value": uma.get_holding_voltage(),
             },
             {
+                "name": "voltage offset",
+                "type": "float",
+                "siPrefix": True,
+                "dec": True,
+                "step": 0.5,
+                "minStep": 1e-3,
+                "suffix": "V",
+                "value": uma.get_param("vc_voltage_offset"),
+            },
+            {
                 "name": "add stim",
                 "type": "action",
             },
             {
-                "name": "run",
-                "type": "bool",
-                "value": True,
-            },
+                "name": "test",
+                "type": "action",
+            }
         ],
     )
     p.sigTreeStateChanged.connect(on_param_change)
@@ -762,47 +799,42 @@ if __name__ == "__main__":
     )
     t_offset = None
 
-    def handle_raw_recv(received_data):
+    def handle_raw_recv(data):
+        # TODO broken after refactor
         global graph_data, t_offset
-        t_offset = received_data["ts"][0] if t_offset is None else t_offset
-        graph_data = np.roll(graph_data, -len(received_data))
+        t_offset = data["ts"][0] if t_offset is None else t_offset
+        graph_data = np.roll(graph_data, -len(data))
 
-        graph_data[-len(received_data) :]["ts"] = (received_data["ts"] - t_offset) * 1e-6
+        graph_data[-len(data):]["ts"] = (data["ts"] - t_offset) * 1e-6
         # ±range_of_current pA w.r.t. ground/common
         # read_data[-len(np_buff):]["current"] = (1e-12 * range_of_current / (2 ** 15)) * np_buff["current"]
-        graph_data[-len(received_data) :]["current"] = (range_of_current / (2 ** 15)) * (
-            received_data["current"].astype(int) - 2 ** 15
+        graph_data[-len(data):]["current"] = (range_of_current / (2 ** 15)) * (
+                data["current"].astype(int) - 2 ** 15
         )
         # ±700 mV w.r.t. ground/common
         # read_data[-len(np_buff):]["voltage"] = np_buff["voltage"] * (0.7 / 2 ** 15)
-        graph_data[-len(received_data) :]["voltage"] = (0.7 / 2 ** 15) * (
-            received_data["voltage"].astype(int) - 2 ** 15
-        )
-        graph_data[-len(received_data) :]["status"] = received_data["status"]
 
-    def handle_scaled_ts_recv(received_data):
+        #graph_data[-len(received_data) :]["voltage"] = (0.7 / 2 ** 15) * (
+        #    received_data["voltage"].astype(int) - 2 ** 15
+        #)
+        graph_data[-len(data):]["voltage"] = data["voltage"].astype(int)
+
+        graph_data[-len(data):]["status"] = data["status"]
+
+    def handle_recv(data: ReceivedData):
         global graph_data, t_offset
-        t_offset = received_data[0] if t_offset is None else t_offset
-        graph_data = np.roll(graph_data, -len(received_data))
+        graph_data = np.roll(graph_data, -len(data))
 
-        graph_data[-len(received_data) :]["ts"] = received_data - t_offset
-        graph_data[-len(received_data) :]["current_expected"] = uma.get_holding_current()
-        graph_data[-len(received_data) :]["voltage_expected"] = uma.get_holding_voltage()
+        time_values = data.get_scaled_time()
+        t_offset = time_values[0] if t_offset is None else t_offset
+        graph_data[-len(data):]["ts"] = time_values - t_offset
+        graph_data[-len(data):]["current_expected"] = uma.get_holding_current()  # TODO
+        graph_data[-len(data):]["voltage_expected"] = uma.get_holding_voltage()  # TODO
+        graph_data[-len(data):]["current"] = data.get_scaled_current()
+        graph_data[-len(data):]["voltage"] = data.get_scaled_voltage()
+        graph_data[-len(data):]["status"] = data.get_raw_status()
 
-    def handle_scaled_current_recv(received_data):
-        graph_data[-len(received_data) :]["current"] = received_data
-
-    def handle_scaled_voltage_recv(received_data):
-        graph_data[-len(received_data) :]["voltage"] = received_data
-
-    def handle_scaled_status_recv(received_data):
-        graph_data[-len(received_data) :]["status"] = received_data
-
-    # uma.add_receive_data_handler_raw(handle_raw_recv)
-    uma.add_receive_data_handler_scaled(handle_scaled_ts_recv, "ts")
-    uma.add_receive_data_handler_scaled(handle_scaled_current_recv, "current")
-    uma.add_receive_data_handler_scaled(handle_scaled_voltage_recv, "voltage")
-    uma.add_receive_data_handler_scaled(handle_scaled_status_recv, "status")
+    uma.add_receive_data_handler(handle_recv)
     uma.start_receiving()
 
     def update_plots():

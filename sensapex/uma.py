@@ -20,17 +20,15 @@ from threading import Thread, RLock, Event
 from typing import Union, Iterable, Dict, List, Callable
 
 import numpy as np
-from typing_extensions import Literal
-
 import pyqtgraph as pg
 from pyqtgraph import mkQApp
 from pyqtgraph.parametertree import ParameterTree, Parameter
 from sensapex import SensapexDevice, UMError
 from sensapex.sensapex import um_state, UMP, LIBUM_TIMEOUT
+from typing_extensions import Literal
 
 faulthandler.enable()
 
-LIBUM_MAX_DEVS = 0xFFFF
 UMA_REG_COUNT = 10
 
 
@@ -54,48 +52,86 @@ class _uma_capture_struct(Structure):
     ]
 
 
-class ReceivedData:
-    def __init__(self, uma: "UMA", data: np.ndarray):
+scaled_data_dtype = [
+    ("status", 'uint8'),
+    ("flags", 'uint8'),
+    ("index", 'uint16'),
+    ("time", 'float32'),
+    ("current", 'float32'),
+    ("voltage", 'float32'),
+]
+
+
+class ReceivedDataBuffer:
+    def __init__(self, max_samples=None):
+        self.max_samples = max_samples
+        self.chunks = []
+        self.n_samples = 0
+
+    def receive_data(self, data: np.ndarray):
+        self.chunks.append(data.get_raw_data())
+        self.n_samples += len(data)
+        if self.max_samples is None:
+            return
+        while(self.n_samples > self.max_samples):
+            chunk = self.chunks.pop(0)
+            self.n_samples -= len(chunk)
+
+    @property
+    def data(self) -> np.ndarray:
+        return np.concatenate(self.chunks)
+
+
+class StimulusFuture(Future):
+    def __init__(self, uma: "UMA", stimulus: np.ndarray):
+        # TODO synchronization between the received data and the stimulus
+        super().__init__()
         self._uma = uma
-        self._output_current_range = uma.get_current_output_range()
-        self._data = data
-        self._float_cast_data = {}
+        self._stimulus = stimulus
+        self._uma.add_receive_data_handler(self._receive_data)
+        self._buffer = ReceivedDataBuffer()
+        self._start_index = None
+        self._end_index = None
 
-    def __len__(self):
-        return len(self._data)
+    def _receive_data(self, data: np.ndarray):
+        self._buffer.receive_data(data)
+        if self._buffer.n_samples >= self._stimulus.shape[0]:
+            self._uma.remove_receive_data_handler(self._receive_data)
+            self.set_result({"start": self._start_index, "end": self._end_index})
 
-    def get_raw_status(self) -> np.ndarray:
-        return self._data["status"]
 
-    def get_raw_flags(self) -> np.ndarray:
-        return self._data["flags"]
+class TaskFuture(Future):
+    def __init__(self, uma: "UMA", stimulus: np.ndarray, parameters: dict):
+        super().__init__()
+        if "clamp_mode" not in parameters:
+            raise ValueError("All stimulus tasks must specify their clamp_mode")
+        self._uma = uma
+        self._stimulus = stimulus
+        self._parameters = parameters
+        self._result = None
+        self._thread = Thread(target=self._run)
+        self._thread.run()
+        self._received_data = []
+        self._finished_event = Event()
 
-    def get_raw_index(self) -> np.ndarray:
-        return self._data["index"]
+    def _run(self):
+        with self._uma.lock:
+            self._uma.set_params(self._parameters)
+            buffer = ReceivedDataBuffer()
+            with self._uma.add_receive_data_handler(buffer.receive_data):
+                self._uma.start_receiving()
+                self._result = self._uma.send_stimulus_raw(self._stimulus)
 
-    def get_raw_voltage(self) -> np.ndarray:
-        return self._data["voltage"]
+                while True:
+                    if self._finished_event.wait(timeout=0.2):
+                        break
 
-    def get_scaled_voltage(self, scale=1) -> np.ndarray:
-        if "voltage" not in self._float_cast_data:
-            self._float_cast_data["voltage"] = self._data["voltage"].astype(float)
-        return self._float_cast_data["voltage"] * (scale * 0.7 / (2 ** 15))
+            self.set_result(buffer.data)  # TODO insufficient
 
-    def get_raw_current(self) -> np.ndarray:
-        return self._data["current"]
-
-    def get_scaled_current(self, scale=1) -> np.ndarray:
-        if "current" not in self._float_cast_data:
-            self._float_cast_data["current"] = self._data["current"].astype(float)
-        return self._float_cast_data["current"] * (scale * self._output_current_range / (2 ** 15))
-
-    def get_raw_time(self) -> np.ndarray:
-        return self._data["ts"]
-
-    def get_scaled_time(self, scale=1) -> np.ndarray:
-        if "ts" not in self._float_cast_data:
-            self._float_cast_data["ts"] = self._data["ts"].astype(float)
-        return self._float_cast_data["ts"] * (scale * 1e-6)
+    def _receive_data_handler(self, data):
+        self._received_data.append(data)
+        if len(self._received_data) > 2:  # TODO
+            self._finished_event.set()
 
 
 class UMA(object):
@@ -181,7 +217,7 @@ class UMA(object):
     def __init__(self, uMp: SensapexDevice):
         # TODO should we enforce only making one of these per device
         self.lock = RLock()
-        self._recv_handlers: List[Callable[[ReceivedData], None]] = []
+        self._recv_handlers: List[Callable[[np.ndarray], None]] = []
         self._state = _uma_state_struct()
         self._libuma = uMp.ump.libuma
         self.sensapex = uMp.ump
@@ -530,10 +566,20 @@ class UMA(object):
                 else:
                     raise e
             else:
-                data = ReceivedData(self, self._np_recv_buffer.copy())
+                data = self._scale_incoming_data(self._np_recv_buffer)
                 # TODO is this too slow? does it need to be threaded?
                 for handler in self._recv_handlers:
                     handler(data)
+
+    def _scale_incoming_data(self, data: np.ndarray):
+        scaled_data = np.zeros(data.shape, dtype=scaled_data_dtype)
+        scaled_data["index"] = data["index"]
+        scaled_data["status"] = data["status"]
+        scaled_data["flags"] = data["flags"]
+        scaled_data["time"] = data["ts"] / 1e6
+        scaled_data["voltage"] = data["voltage"] * (0.7 / (2 ** 15))
+        scaled_data["current"] = data["current"] * (self.get_current_output_range() / (2 ** 15))  # TODO get this value before calc time to prevent race
+        return scaled_data
 
     def start_receiving(self):
         """
@@ -547,12 +593,12 @@ class UMA(object):
         self._pause_recv_thread = True
         self.call("stop")
 
-    def add_receive_data_handler(self, handler: Callable[[ReceivedData], None]):
+    def add_receive_data_handler(self, handler: Callable[[np.ndarray], None]):
         """
         Parameters
         ----------
         handler
-            This callable should accept a ReceivedData argument. It will be run in the inner loop of data receiving, so
+            This callable should accept a numpy array argument. It will be run in the inner loop of data receiving, so
             try not to do anything too expensive.
         """
         self._recv_handlers.append(handler)
@@ -658,7 +704,7 @@ class UMA(object):
 
     def set_params(self, parameters):
         with self.pause_receiving():
-            for name, value in parameters:
+            for name, value in parameters.items():
                 self.set_param(name, value)
 
 
@@ -675,13 +721,6 @@ if __name__ == "__main__":
     # print(um.list_devices())
     dev1 = um.get_device(1)
     uma = UMA(dev1)
-
-    # dev_array = (c_int * LIBUM_MAX_DEVS)()
-    # # _uma_lib.uma_get_device_list.restype = c_int
-    # # init_ret = _uma_lib.uma_init", handle, c_int(1))
-    # n_devs = uma.call("get_device_list", byref(dev_array), c_int(LIBUM_MAX_MANIPULATORS))
-    # if n_devs >= 0:
-    #     print([dev_array[i] for i in range(n_devs)])
 
     range_of_current = 20000e-12
     read_sample_rate = 9776
@@ -788,57 +827,28 @@ if __name__ == "__main__":
 
     graph_data = np.zeros(
         int(5 * read_sample_rate),
-        dtype=[
-            ("ts", float),
-            ("current", float),
-            ("current_expected", float),
-            ("voltage", float),
-            ("voltage_expected", float),
-            ("status", int),
-        ],
+        dtype=scaled_data_dtype + [("current_expected", float), ("voltage_expected", float),],
     )
     t_offset = None
 
-    def handle_raw_recv(data):
-        # TODO broken after refactor
-        global graph_data, t_offset
-        t_offset = data["ts"][0] if t_offset is None else t_offset
-        graph_data = np.roll(graph_data, -len(data))
-
-        graph_data[-len(data):]["ts"] = (data["ts"] - t_offset) * 1e-6
-        # ±range_of_current pA w.r.t. ground/common
-        # read_data[-len(np_buff):]["current"] = (1e-12 * range_of_current / (2 ** 15)) * np_buff["current"]
-        graph_data[-len(data):]["current"] = (range_of_current / (2 ** 15)) * (
-                data["current"].astype(int) - 2 ** 15
-        )
-        # ±700 mV w.r.t. ground/common
-        # read_data[-len(np_buff):]["voltage"] = np_buff["voltage"] * (0.7 / 2 ** 15)
-
-        #graph_data[-len(received_data) :]["voltage"] = (0.7 / 2 ** 15) * (
-        #    received_data["voltage"].astype(int) - 2 ** 15
-        #)
-        graph_data[-len(data):]["voltage"] = data["voltage"].astype(int)
-
-        graph_data[-len(data):]["status"] = data["status"]
-
-    def handle_recv(data: ReceivedData):
+    def handle_recv(data: np.ndarray):
         global graph_data, t_offset
         graph_data = np.roll(graph_data, -len(data))
 
-        time_values = data.get_scaled_time()
+        time_values = data["time"]
         t_offset = time_values[0] if t_offset is None else t_offset
-        graph_data[-len(data):]["ts"] = time_values - t_offset
+        graph_data[-len(data):]["time"] = time_values - t_offset
         graph_data[-len(data):]["current_expected"] = uma.get_holding_current()  # TODO
         graph_data[-len(data):]["voltage_expected"] = uma.get_holding_voltage()  # TODO
-        graph_data[-len(data):]["current"] = data.get_scaled_current()
-        graph_data[-len(data):]["voltage"] = data.get_scaled_voltage()
-        graph_data[-len(data):]["status"] = data.get_raw_status()
+        graph_data[-len(data):]["current"] = data["current"]
+        graph_data[-len(data):]["voltage"] = data["voltage"]
+        graph_data[-len(data):]["status"] = data["status"]
 
     uma.add_receive_data_handler(handle_recv)
     uma.start_receiving()
 
     def update_plots():
-        t = graph_data["ts"]
+        t = graph_data["time"]
         p1.plot(t, graph_data["current"], clear=True)
         p2.plot(t, graph_data["voltage"], clear=True)
         if uma.get_clamp_mode() == "IC":
@@ -851,24 +861,34 @@ if __name__ == "__main__":
     timer.timeout.connect(update_plots)
     timer.start(10)
 
+    stim_plot = pg.PlotWidget()
+    stim_plot.setTitle(f"Voltage recording during stims")
+
+
     def insert_stim(raw=None, scaled=None):
-        global np_stim_raw
+        global np_stim_raw, stim_plot
         if raw is None and scaled is None:
             raw = 30
         if raw is not None:
             np_stim_raw[0:-20] = raw
-            uma.send_stimulus_raw(np_stim_raw, trig)
+            fut = uma.send_stimulus_raw(np_stim_raw, trig)
         else:
             np_stim_scaled[0:-20] = scaled
-            uma.send_stimulus_scaled(np_stim_scaled)
+            fut = uma.send_stimulus_scaled(np_stim_scaled)
+        data = fut.result()["data"]
+        stim_plot.plot(data.get_scaled_time(), data.get_scaled_voltage())
+        stim_plot.show()
+
+        return fut
 
     def stim_train():
+        stim_plot.clear()
         def _do_stims():
             if uma.get_clamp_mode() == "IC":
                 max_stim = uma.get_current_input_range()
                 steps = 17
             else:
-                max_stim = 0.7
+                max_stim = 0.05
                 steps = 9
             for i in range(steps):
                 insert_stim(scaled=max_stim / (2 ** i))
@@ -903,7 +923,7 @@ if __name__ == "__main__":
     def test_stim():
         def _do_test():
             global timer, stim_timer, graph_data
-            start_ts = graph_data["ts"][-1]
+            start_ts = graph_data["time"][-1]
             print(f"latest timestamp on a sample at start stim {start_ts}")
             insert_stim(2 ** 9)  # todo broken
             print("sleeping")
@@ -911,7 +931,7 @@ if __name__ == "__main__":
             local_read_data = graph_data.copy()
             try:
                 trig_index = np.argwhere(local_read_data["current"] > 20e-12)[0, 0]
-                trig_time = local_read_data[trig_index]["ts"]
+                trig_time = local_read_data[trig_index]["time"]
                 print(f"Stim detected at t={trig_time}")
                 print(f"time difference: {trig_time - start_ts}")
             except IndexError:

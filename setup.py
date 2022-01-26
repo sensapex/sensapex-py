@@ -50,7 +50,7 @@ setup(
         "Topic :: Scientific/Engineering",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
-    cmdclass=dict(install=DownloadBinariesAndInstall),
+    cmdclass={"install": DownloadBinariesAndInstall},
     description="Python wrapper for the Sensapex SDK",
     install_requires=["numpy",],
     license="MIT",
@@ -60,5 +60,5 @@ setup(
     packages=find_packages(),
     python_requires=">=3.7",
     url="https://github.com/sensapex/sensapex-py",
-    version="1.022.1",  # in lock step with umsdk version
+    version="1.022.2",  # in lock step with umsdk version
 )

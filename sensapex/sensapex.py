@@ -145,6 +145,12 @@ class MoveRequest(object):
         dest4 = [d if d is not None else float("nan") for d in dest4]
 
         self.start_pos = self._read_position()
+        target = np.array(dest).astype(float)
+        if self.start_pos.shape != target.shape:
+            raise ValueError(
+                f"Is device #{self.dev} configured for the correct number of axes? {self.start_pos.shape} != {target.shape}"
+            )
+
         diff = [float(d - c) for d, c in zip(dest4, self.start_pos) if d != float("nan")]
         if linear:
             dist = max(1.0, np.linalg.norm(diff))
@@ -227,8 +233,6 @@ class MoveRequest(object):
     def is_close_enough(self):
         pos = self._read_position()
         target = np.array(self.target_pos).astype(float)
-        if pos.shape != target.shape:
-            raise ValueError("Is your device configured for the correct number of axes?", None, None)
         err = np.abs(pos - target)
         mask = np.isfinite(err)
         return np.all(err[mask] < self._retry_threshold[: len(mask)][mask])
@@ -693,7 +697,7 @@ class UMP(object):
 
     def run_um_cmd(self, dev_id, cmd, *args):
         argv = (c_int * len(args))()
-        for i,x in enumerate(args):
+        for i, x in enumerate(args):
             argv[i] = x
         self.call('um_cmd', c_int(dev_id), c_int(cmd), c_int(len(args)), byref(argv))
 

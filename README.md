@@ -88,6 +88,12 @@ Thanks to the following for contributions:
 
 ### Changelog
 
+#### 1.022.3
+* Bad MoveRequests should blow up on init, rather than during movement.
+
+#### 1.022.2
+* A bunch of fixes from Luke.
+
 #### 1.022.1
 
 * Debug mode: logs, hardware details and PCAP

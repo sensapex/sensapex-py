@@ -828,6 +828,9 @@ class SensapexDevice(object):
     def set_n_axes(self, n_axes):
         self.ump.set_axis_count(self.dev_id, n_axes)
 
+    def n_axes(self):
+        return self.ump.axis_count(self.dev_id)
+
     def set_max_acceleration(self, max_acceleration):
         self.ump.set_max_acceleration(self.dev_id, max_acceleration)
 

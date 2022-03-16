@@ -8,28 +8,42 @@ from distutils.command.install import install
 from os import path
 
 from setuptools import setup, find_packages
+from setuptools.command.develop import develop
 
 
 class DownloadBinariesAndInstall(install):
     def run(self):
         super(DownloadBinariesAndInstall, self).run()
-        if platform.system() == 'Windows':
-            dll_data = self.download_from_zip('http://dist.sensapex.com/misc/um-sdk/latest/umsdk-1.022-binaries.zip', ["libum.dll"])[0]
-            with open(os.path.join(self.install_purelib, "sensapex", "libum.dll"), "wb") as install_target:
-                install_target.write(dll_data)
-            umpcli_data = self.download_from_zip('http://dist.sensapex.com/misc/umpcli/umpcli-0_951-beta.zip', ["umpcli-0_951-beta.exe"])[0]
-            with open(os.path.join(self.install_purelib, "sensapex", "umpcli.exe"), "wb") as install_target:
-                install_target.write(umpcli_data)
+        install_bin(os.path.join(self.install_purelib, 'sensapex'))
 
-    def download_from_zip(self, url, files):
-        req = urllib.request.urlopen(url)
-        content_file = BytesIO(req.read())
-        data = []
-        with ZipFile(content_file, "r") as zip_file:
-            for fname in files:
-                with zip_file.open(fname) as req_file:
-                    data.append(req_file.read())
-        return data
+
+class DownloadBinariesAndDevelop(develop):
+    def run(self):
+        super(DownloadBinariesAndDevelop, self).run()
+        install_bin(os.path.join(self.egg_path, 'sensapex'))
+
+
+def install_bin(path):
+    """Install libum.dll and umpcli.exe to *path*."""
+    if platform.system() == 'Windows':
+        dll_data = download_from_zip('http://dist.sensapex.com/misc/um-sdk/latest/umsdk-1.022-binaries.zip', ["libum.dll"])[0]
+        print(f"Install libum.dll to {path}")
+        with open(os.path.join(path, "libum.dll"), "wb") as install_target:
+            install_target.write(dll_data)
+        umpcli_data = download_from_zip('http://dist.sensapex.com/misc/umpcli/umpcli-0_951-beta.zip', ["umpcli-0_951-beta.exe"])[0]
+        with open(os.path.join(path, "umpcli.exe"), "wb") as install_target:
+            install_target.write(umpcli_data)
+
+
+def download_from_zip(url, files):
+    req = urllib.request.urlopen(url)
+    content_file = BytesIO(req.read())
+    data = []
+    with ZipFile(content_file, "r") as zip_file:
+        for fname in files:
+            with zip_file.open(fname) as req_file:
+                data.append(req_file.read())
+    return data
 
 
 this_directory = path.abspath(path.dirname(__file__))
@@ -50,7 +64,7 @@ setup(
         "Topic :: Scientific/Engineering",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
-    cmdclass={"install": DownloadBinariesAndInstall},
+    cmdclass={"install": DownloadBinariesAndInstall, "develop": DownloadBinariesAndDevelop},
     description="Python wrapper for the Sensapex SDK",
     install_requires=["numpy",],
     license="MIT",

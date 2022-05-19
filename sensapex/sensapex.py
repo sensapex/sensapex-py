@@ -219,13 +219,20 @@ class MoveRequest(object):
 
     def start(self):
         self._next_move_index = 0
-        self.make_next_call()
+        try:
+            self.make_next_call()
+        except UMError as err:
+            if err.errno == -4:
+                # invalid argument; don't try again
+                self.interrupted = True
+                self.interrupt_reason = str(err)
+                self.finish()
 
     def is_in_progress(self):
         return self.ump.is_busy(self.dev)
 
     def can_retry(self):
-        return self._retries < self.max_retries
+        return self._retries < self.max_retries and not self.finished
 
     def _read_position(self):
         return np.array(self.ump.get_pos(self.dev, timeout=-1))
@@ -539,8 +546,8 @@ class UMP(object):
                     err_msg = f"UM OS Error {oserr:d}: {os.strerror(oserr)}"
                     exc = UMError(err_msg, None, oserr)
                 else:
-                    errstr = self.lib.um_errorstr(err)
-                    err_msg = f"UM Error {err:d}: {errstr}  From {fn}{args!r}"
+                    errstr = self.lib.um_errorstr(err).decode()
+                    err_msg = f"UM Error: {err:d}: '{errstr}' from {fn}{args!r}"
                     exc = UMError(err_msg, err, None)
                 self._write_debug(err_msg, error=exc)
                 raise exc
@@ -753,15 +760,19 @@ class UMP(object):
     def _update_moves(self):
         with self.lock:
             for dev, move in list(self._last_move.items()):
-                if move.is_in_progress():
-                    continue
-                if move.has_more_calls_to_make():
-                    move.make_next_call()
-                elif move.can_retry() and not move.is_close_enough():
-                    move.retry()
-                else:
-                    self._last_move.pop(dev)
-                    move.finish()
+                try:
+                    if move.is_in_progress():
+                        continue
+                    if move.has_more_calls_to_make():
+                        move.make_next_call()
+                    elif move.can_retry() and not move.is_close_enough():
+                        move.retry()
+                    else:
+                        self._last_move.pop(dev)
+                        move.finish()
+                except Exception as exc:
+                    print(f"Error processing move on sensapex device {dev}")
+                    sys.excepthook(*sys.exc_info())
 
     def track_device_ids(self, *dev_ids):
         for dev in dev_ids:

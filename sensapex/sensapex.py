@@ -490,7 +490,7 @@ class UMP(object):
                     except subprocess.TimeoutExpired:
                         self._pcap_proc.terminate()
 
-    def get_device(self, dev_id) -> SensapexDevice:
+    def get_device(self, dev_id, *args, **kwargs) -> SensapexDevice:
         """
 
         Returns

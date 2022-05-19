@@ -148,7 +148,8 @@ class MoveRequest(object):
         target = np.array(dest).astype(float)
         if self.start_pos.shape != target.shape:
             raise ValueError(
-                f"Is device #{self.dev} configured for the correct number of axes? {self.start_pos.shape} != {target.shape}"
+                f"Is device #{self.dev} configured for the correct number of axes?"
+                f" {self.start_pos.shape} != {target.shape}"
             )
 
         diff = [float(d - c) for d, c in zip(dest4, self.start_pos) if d != float("nan")]
@@ -352,7 +353,7 @@ class UMP(object):
         self.broadcast_address = address.decode()
         self.lock = threading.RLock()
         if self._single is not None:
-            raise Exception("Won't create another UM object. Use get_ump() instead.")
+            raise RuntimeError("Won't create another UM object. Use get_ump() instead.")
         self._timeout = 200
 
         # duration that manipulator must be not busy before a move is considered complete.
@@ -372,15 +373,15 @@ class UMP(object):
         self._set_debug_mode(self._debug)
 
         min_version = (1, 21)
-        min_version_str = "v{:d}.{:d}".format(*min_version)
         max_version = (1, 22)
-        max_version_str = "v{:d}.{:d}".format(*max_version)
         version_str = self.sdk_version()
         version = tuple(map(int, version_str.lstrip(b"v").split(b".")))
 
         if version < min_version:
+            min_version_str = "v{:d}.{:d}".format(*min_version)
             raise RuntimeError(f"SDK version {min_version_str} or later required (your version is {version_str})")
         if version > max_version:
+            max_version_str = "v{:d}.{:d}".format(*max_version)
             raise RuntimeError(f"SDK version {max_version_str} or lower required (your version is {version_str})")
 
         self.h = None
@@ -430,14 +431,14 @@ class UMP(object):
     def _ensure_debug_can_be_enabled(self):
         try:
             Path(self._debug_dir).mkdir(parents=True, exist_ok=True)
-        except PermissionError:
-            raise RuntimeError(f"user does not have permission to create debug directory {self._debug_dir}")
+        except PermissionError as e:
+            raise RuntimeError(f"user does not have permission to create debug directory {self._debug_dir}") from e
         try:
             returncode = subprocess.run([DUMPCAP, "-v"], capture_output=True).returncode
             if returncode != 0:
                 raise RuntimeError(f"dumpcap executable '{DUMPCAP}' failed with return {returncode}")
-        except PermissionError:
-            raise RuntimeError(f"user does not have permission to use dumpcap executable '{DUMPCAP}'")
+        except PermissionError as e:
+            raise RuntimeError(f"user does not have permission to use dumpcap executable '{DUMPCAP}'") from e
 
     def _write_debug(self, message: str, error: Union[Exception, None] = None):
         if self._debug:
@@ -499,8 +500,8 @@ class UMP(object):
         if dev_id not in self.devices:
             all_devs = self.list_devices()
             if dev_id not in all_devs:
-                raise Exception(f"Invalid sensapex device ID {dev_id}. Options are: {all_devs!r}")
-            self.devices[dev_id] = SensapexDevice(dev_id)
+                raise ValueError(f"Invalid sensapex device ID {dev_id}. Options are: {all_devs!r}")
+            self.devices[dev_id] = SensapexDevice(dev_id, *args, **kwargs)
             self.track_device_ids(dev_id)
         return self.devices[dev_id]
 

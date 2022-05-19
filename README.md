@@ -88,6 +88,11 @@ Thanks to the following for contributions:
 
 ### Changelog
 
+#### 1.022.4
+* Binary installer works in develop mode
+* Errors no longer prevent other devices from moving
+* Allow init args for UMP.get_device (to avoid n_axes race)
+
 #### 1.022.3
 * Bad MoveRequests should blow up on init, rather than during movement.
 

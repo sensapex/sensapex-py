@@ -36,6 +36,9 @@ parser.add_argument(
 parser.add_argument("--iter", type=int, default=10, help="Number of positions to test")
 parser.add_argument("--acceleration", type=int, default=0, help="Max speed acceleration")
 parser.add_argument(
+    "--linear", action="store_true", default=False, dest="linear", help="Move all 3 axes simultaneously"
+)
+parser.add_argument(
     "--high-res",
     action="store_true",
     default=False,
@@ -100,10 +103,25 @@ errplots[0].setXLink(plots[0])
 errplots[1].setXLink(plots[0])
 errplots[2].setXLink(plots[0])
 
+if args.linear:
+    win.nextRow()
+    linerrplots = [
+        win.addPlot(labels={"left": ("x linear error", "m"), "bottom": ("time", "s")}),
+        win.addPlot(labels={"left": ("y linear error", "m"), "bottom": ("time", "s")}),
+        win.addPlot(labels={"left": ("z linear error", "m"), "bottom": ("time", "s")}),
+    ]
+    linerrplots[1].setYLink(linerrplots[0])
+    linerrplots[2].setYLink(linerrplots[0])
+    linerrplots[0].setXLink(plots[0])
+    linerrplots[1].setXLink(plots[0])
+    linerrplots[2].setXLink(plots[0])
+
 start = pg.ptime.time()
 pos = [[], [], []]
 tgt = [[], [], []]
 err = [[], [], []]
+closest = [[], [], []]
+linear_err = [[], [], []]
 bus = []
 mov = []
 times = []
@@ -111,23 +129,39 @@ times = []
 lastupdate = pg.ptime.time()
 
 
-def update(update_error=False):
+def update(moving=True):
     global lastupdate
     timeout = -1 if args.high_res else 0
-    p = dev.get_pos(timeout=timeout)
+    position = dev.get_pos(timeout=timeout)
     s = dev.is_busy()
     m = not move_req.finished
     bus.append(int(s))
     mov.append(int(m))
     now = pg.ptime.time() - start
     times.append(now)
+
+    # last -> p
+    # ltarget -> target
+    # stby -> last_target
+    target_to_pos = position - target
+    target_to_last = last_target - target
+    target_to_last /= np.linalg.norm(target_to_last)
+    closest_pos = target + np.dot(target_to_pos, target_to_last) * target_to_last
+    dist = position - closest_pos
+
     for i in range(3):
-        pos[i].append((p[i] - start_pos[i]) * 1e-6)
+        pos[i].append((position[i] - start_pos[i]) * 1e-6)
         tgt[i].append((target[i] - start_pos[i]) * 1e-6)
-        if update_error:
-            err[i].append(pos[i][-1] - tgt[i][-1])
-        else:
+        if moving:
             err[i].append(np.nan)
+            # only update linear error when moving
+            closest[i].append((closest_pos[i] - start_pos[i]) * 1e-6)
+            linear_err[i].append(dist[i] * 1e-6)
+        else:
+            # only update position error when stopped
+            err[i].append(pos[i][-1] - tgt[i][-1])
+            closest[i].append(np.nan)
+            linear_err[i].append(np.nan)
 
 
 def update_plots():
@@ -143,7 +177,10 @@ def update_plots():
         )
         plots[i].plot(times, tgt[i], pen="r")
         plots[i].plot(times, pos[i], symbol="o", symbolSize=5)
+        plots[i].plot(times, closest[i], pen=(100, 100, 100))
         errplots[i].plot(times, err[i], clear=True, connect="finite")
+        if args.linear:
+            linerrplots[i].plot(times, linear_err[i], clear=True, connect="finite")
 
 
 if args.start_pos is None:
@@ -203,13 +240,14 @@ dev.stop()
 
 for i in range(args.iter):
     target = targets[i]
-    move_req = dev.goto_pos(target, speed=speeds[i], linear=False, max_acceleration=args.acceleration)
+    last_target = start_pos if i == 0 else targets[i-1]
+    move_req = dev.goto_pos(target, speed=speeds[i], linear=args.linear, max_acceleration=args.acceleration)
     while not move_req.finished:
-        update(update_error=False)
+        update(moving=True)
         time.sleep(0.002)
     waitstart = pg.ptime.time()
     while pg.ptime.time() - waitstart < 1.0:
-        update(update_error=True)
+        update(moving=False)
         time.sleep(0.002)
         # time.sleep(0.05)
     p2 = dev.get_pos(timeout=200)

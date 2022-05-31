@@ -116,7 +116,7 @@ if args.linear:
     linerrplots[1].setXLink(plots[0])
     linerrplots[2].setXLink(plots[0])
 
-start = pg.ptime.time()
+start = time.perf_counter()
 pos = [[], [], []]
 tgt = [[], [], []]
 err = [[], [], []]
@@ -126,7 +126,7 @@ bus = []
 mov = []
 times = []
 
-lastupdate = pg.ptime.time()
+lastupdate = time.perf_counter()
 
 
 def update(moving=True):
@@ -137,14 +137,12 @@ def update(moving=True):
     m = not move_req.finished
     bus.append(int(s))
     mov.append(int(m))
-    now = pg.ptime.time() - start
+    now = time.perf_counter() - start
     times.append(now)
 
-    # last -> p
-    # ltarget -> target
-    # stby -> last_target
+    # calculate closest point to the line from starting position to target
     target_to_pos = position - target
-    target_to_last = last_target - target
+    target_to_last = last_position_before_move - target
     target_to_last /= np.linalg.norm(target_to_last)
     closest_pos = target + np.dot(target_to_pos, target_to_last) * target_to_last
     dist = position - closest_pos
@@ -240,13 +238,13 @@ dev.stop()
 
 for i in range(args.iter):
     target = targets[i]
-    last_target = start_pos if i == 0 else targets[i-1]
+    last_position_before_move = dev.get_pos()
     move_req = dev.goto_pos(target, speed=speeds[i], linear=args.linear, max_acceleration=args.acceleration)
     while not move_req.finished:
         update(moving=True)
         time.sleep(0.002)
-    waitstart = pg.ptime.time()
-    while pg.ptime.time() - waitstart < 1.0:
+    waitstart = time.perf_counter()
+    while time.perf_counter() - waitstart < 1.0:
         update(moving=False)
         time.sleep(0.002)
         # time.sleep(0.05)

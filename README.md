@@ -88,6 +88,9 @@ Thanks to the following for contributions:
 
 ### Changelog
 
+#### 1.022.5
+* The accuracy_test script now takes `--linear` to test linear movements.
+
 #### 1.022.4
 * Binary installer works in develop mode
 * Errors no longer prevent other devices from moving

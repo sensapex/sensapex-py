@@ -29,12 +29,13 @@ parser.add_argument(
     "--z", action="store_true", default=False, dest="z", help="True = Random Z axis values. False = keep start position"
 )
 
-parser.add_argument("--speed", type=int, default=1000, help="Movement speed in um/sec")
+parser.add_argument("--speed", type=float, default=1000, help="Movement speed in um/sec")
 parser.add_argument(
-    "--distance", type=int, default=10, help="Max distance to travel in um (relative to current position)"
+    "--distance", type=float, default=10, help="Max distance to travel in um (relative to current position)"
 )
 parser.add_argument("--iter", type=int, default=10, help="Number of positions to test")
-parser.add_argument("--acceleration", type=int, default=0, help="Max speed acceleration")
+parser.add_argument("--acceleration", type=float, default=0, help="Max speed acceleration")
+parser.add_argument("--retry-threshold", type=float, default=None, dest='retry_threshold', help="Distance error threshold at which to retry a move")
 parser.add_argument(
     "--linear", action="store_true", default=False, dest="linear", help="Move all 3 axes simultaneously"
 )
@@ -186,36 +187,18 @@ if args.start_pos is None:
 else:
     start_pos = np.array(list(map(float, args.start_pos.split(","))))
 
-print(start_pos)
+print("Starting position:", start_pos)
 diffs = []
 errs = []
 positions = []
 if args.test_pos is None:
-    xmoves = []
-    ymoves = []
-    zmoves = []
-
-    if args.x:
-        xmoves = (np.random.random(size=(args.iter, 1)) * args.distance).astype(int)
-    else:
-        xmoves = np.zeros(args.iter)
-
-    if args.y:
-        ymoves = (np.random.random(size=(args.iter, 1)) * args.distance).astype(int)
-    else:
-        ymoves = np.zeros(args.iter)
-
-    if args.z:
-        zmoves = (np.random.random(size=(args.iter, 1)) * args.distance).astype(int)
-    else:
-        zmoves = np.zeros(args.iter)
-
-    moves = np.column_stack((xmoves, ymoves, zmoves))
-
-    #    moves = (np.random.random(size=(args.iter, 3)) * args.distance*1000).astype(int)
+    moves = np.random.random(size=(args.iter, 3)) * args.distance
+    move_axes = np.array([args.x, args.y, args.z])
+    assert np.any(move_axes), "No axes selected to move (use --x, --y, --z, or --test-pos)"
+    moves[:, ~move_axes] = 0
     targets = np.array(start_pos)[np.newaxis, :] + moves
-    print(moves)
-    print(targets)
+    print(f"Distance to move each axis:\n{moves}")
+    print(f"Target positions:\n{targets}")
 else:
     # just move back and forth between start and test position
     test_pos = np.array(list(map(float, args.test_pos.split(","))))
@@ -224,17 +207,11 @@ else:
     targets[1::2] = test_pos[None, :]
 speeds = [args.speed] * args.iter
 
-# targets = np.array([[15431718, 7349832, 17269820], [15432068, 7349816, 17249852]] * 5)
-# speeds = [100, 2] * args.iter
-
-# targets = np.array([[13073580, 13482162, 17228380], [9280157.0, 9121206.0, 12198605.]] * 5)
-# speeds = [1000] * args.iter
-
-# targets = np.array([[9335078, 10085446, 12197238], [14793665.0, 11658668.0, 17168934.]] * 5)
-# speeds = [1000] * args.iter
-
 
 dev.stop()
+
+if args.retry_threshold is not None:
+    ump.set_retry_threshold(args.retry_threshold)
 
 for i in range(args.iter):
     target = targets[i]
@@ -253,7 +230,8 @@ for i in range(args.iter):
     diff = (p2 - target) * 1e-6
     diffs.append(diff)
     errs.append(np.linalg.norm(diff))
-    print(i, diff, errs[-1])
+
+    print(f"{i} attempts: {move_req.attempts}  error: {errs[-1]*1e6:0.2f} um   [{' '.join(['%0.2f'%(x*1e6) for x in diff])}]")
 
 update_plots()
 

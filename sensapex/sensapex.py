@@ -120,10 +120,9 @@ class MoveRequest(object):
     """Class for coordinating and tracking moves.
     """
 
-    max_retries = 3
+    max_attempts = 3
 
     def __init__(self, ump, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, retry_threshold=0.4):
-        dest = [float(x) for x in dest]
 
         self._next_move_index = 0
         self._last_pos_exception = None
@@ -133,7 +132,7 @@ class MoveRequest(object):
         self.interrupt_reason = None
         self.interrupted = False
         self.last_pos = None
-        self._retries = 0
+        self.attempts = 0
         self._retry_threshold = np.array([retry_threshold] * 4)
         self.speed = speed
         self.start_time = timer()
@@ -141,25 +140,34 @@ class MoveRequest(object):
         self.ump = ump
 
         linear = linear and simultaneous
-        dest4 = dest + [float("nan")] * (4 - len(dest))  # extend to 4 values
-        dest4 = [d if d is not None else float("nan") for d in dest4]
 
         self.start_pos = self._read_position()
-        target = np.array(dest).astype(float)
-        if self.start_pos.shape != target.shape:
+        if len(self.start_pos) != len(dest):
             raise ValueError(
-                f"Is device #{self.dev} configured for the correct number of axes?"
-                f" {self.start_pos.shape} != {target.shape}"
+                f"Device #{self.dev} is configured for {len(self.start_pos)} axes, "
+                f"but target position has {len(dest)} elements."
             )
 
-        diff = [float(d - c) for d, c in zip(dest4, self.start_pos) if d != float("nan")]
-        if linear:
-            dist = max(1.0, np.linalg.norm(diff))
-            speed = [max(1.0, speed * abs(d / dist)) for d in diff]
-            speed += [0] * (4 - len(speed))
-        else:
-            speed = [max(1.0, speed)] * 4  # speed < 1 crashes the uMp
+        # extend dest to 4 values
+        def resize_to_4(arr):
+            return np.array([arr[i] if (i < len(arr) and arr[i] is not None) else np.nan for i in range(4)]).astype(float)
+        dest4 = resize_to_4(dest)
 
+        # disable axes that are already close enough to their target
+        diff = dest4 - resize_to_4(self.start_pos)
+        no_move_mask = np.abs(diff) < self._retry_threshold
+        dest4[no_move_mask] = np.nan
+
+        # assign speeds to each axis
+        min_speed = 1.0  # speed < 1 crashes the uMp
+        if linear:
+            dist = max(1.0, np.linalg.norm(diff[np.isfinite(diff)]))
+            speed = np.clip(speed * np.abs(diff / dist), min_speed, np.inf)
+            speed[~np.isfinite(speed)] = 0
+        else:
+            speed = [max(min_speed, speed)] * 4
+
+        # pick acceleration value
         if max_acceleration == 0 or max_acceleration is None:
             if self.ump.default_max_accelerations[dev] is not None:
                 max_acceleration = self.ump.default_max_accelerations[dev]
@@ -171,7 +179,7 @@ class MoveRequest(object):
             self._moves = (self._movement_args(max_acceleration, dest4, speed, simultaneous),)
         else:
             self.estimated_duration = sum(np.array(diff) / speed[: len(diff)])
-            if self.start_pos[0] < dest[0]:  # starting behind the dest means insertion
+            if self.start_pos[0] < dest4[0]:  # starting behind the dest means insertion
                 just_y = dest4[:]
                 just_y[0] = float("nan")
                 just_y[2] = float("nan")
@@ -219,6 +227,7 @@ class MoveRequest(object):
             self.finished_event.set()
 
     def start(self):
+        self.attempts += 1
         self._next_move_index = 0
         try:
             self.make_next_call()
@@ -233,7 +242,7 @@ class MoveRequest(object):
         return self.ump.is_busy(self.dev)
 
     def can_retry(self):
-        return self._retries < self.max_retries and not self.finished
+        return self.attempts < self.max_attempts and not self.finished
 
     def _read_position(self):
         return np.array(self.ump.get_pos(self.dev, timeout=-1))
@@ -244,10 +253,6 @@ class MoveRequest(object):
         err = np.abs(pos - target)
         mask = np.isfinite(err)
         return np.all(err[mask] < self._retry_threshold[: len(mask)][mask])
-
-    def retry(self):
-        self._retries += 1
-        self.start()
 
     def has_more_calls_to_make(self):
         return self._next_move_index < len(self._moves)
@@ -767,7 +772,7 @@ class UMP(object):
                     if move.has_more_calls_to_make():
                         move.make_next_call()
                     elif move.can_retry() and not move.is_close_enough():
-                        move.retry()
+                        move.start()
                     else:
                         self._last_move.pop(dev)
                         move.finish()

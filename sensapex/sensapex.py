@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import atexit
-import ctypes
+import contextlib
 import os
 import platform
 import subprocess
@@ -9,21 +9,25 @@ import sys
 import threading
 import time
 from ctypes import (
-    c_int,
-    c_uint,
-    c_ulong,
-    c_short,
-    c_ushort,
+    CFUNCTYPE,
+    POINTER,
+    Structure,
+    byref,
     c_byte,
-    c_void_p,
     c_char,
     c_char_p,
-    c_longlong,
-    byref,
-    POINTER,
-    pointer,
-    Structure,
     c_float,
+    c_int,
+    c_longlong,
+    c_short,
+    c_uint,
+    c_ulong,
+    c_ushort,
+    c_void_p,
+    cdll,
+    create_string_buffer,
+    pointer,
+    windll,
 )
 from datetime import datetime
 from pathlib import Path
@@ -74,7 +78,7 @@ class sockaddr_in(Structure):
     ]
 
 
-log_func_ptr = ctypes.CFUNCTYPE(c_void_p, c_int, c_void_p, POINTER(c_char), POINTER(c_char))
+log_func_ptr = CFUNCTYPE(c_void_p, c_int, c_void_p, POINTER(c_char), POINTER(c_char))
 
 
 class um_positions(Structure):
@@ -316,19 +320,16 @@ class UMP(object):
         path = os.path.abspath(os.path.dirname(__file__))
         if sys.platform == "win32":
             if cls._lib_path is not None:
-                return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, "libum"))
+                return windll.LoadLibrary(os.path.join(cls._lib_path, "libum"))
 
-            try:
-                return ctypes.windll.libum
-            except OSError:
-                pass
-
-            return ctypes.windll.LoadLibrary(os.path.join(path, "libum"))
+            with contextlib.suppress(OSError):
+                return windll.libum
+            return windll.LoadLibrary(os.path.join(path, "libum"))
         else:
             if cls._lib_path is not None:
-                return ctypes.cdll.LoadLibrary(os.path.join(cls._lib_path, "libum.so"))
+                return cdll.LoadLibrary(os.path.join(cls._lib_path, "libum.so"))
 
-            return ctypes.cdll.LoadLibrary(os.path.join(path, "libum.so"))
+            return cdll.LoadLibrary(os.path.join(path, "libum.so"))
 
     @classmethod
     def get_um_state_class(cls):
@@ -508,7 +509,7 @@ class UMP(object):
     def sdk_version(self):
         """Return version of UM SDK.
         """
-        self.lib.um_get_version.restype = ctypes.c_char_p
+        self.lib.um_get_version.restype = c_char_p
         return self.lib.um_get_version()
 
     def list_devices(self, max_id=50):
@@ -564,7 +565,7 @@ class UMP(object):
         """
         if self.h is not None:
             raise TypeError("UM is already open.")
-        addr = ctypes.create_string_buffer(address)
+        addr = create_string_buffer(address)
         self.lib.um_open.restype = c_longlong
         ptr = self.lib.um_open(addr, c_uint(self._timeout), c_int(group))
         if ptr <= 0:
@@ -707,7 +708,7 @@ class UMP(object):
         argv = (c_int * len(args))()
         for i, x in enumerate(args):
             argv[i] = x
-        self.call('um_cmd', c_int(dev_id), c_int(cmd), c_int(len(args)), byref(argv))
+        self.call("um_cmd", c_int(dev_id), c_int(cmd), c_int(len(args)), byref(argv))
 
     def restart_device(self, dev_id):
         self.run_um_cmd(dev_id, 3)
@@ -803,7 +804,7 @@ class UMP(object):
 
         Returns after ping is received, or raises an exception on timeout.
         """
-        self.call('um_ping', c_int(dev_id))
+        self.call("um_ping", c_int(dev_id))
 
 
 class SensapexDevice(object):

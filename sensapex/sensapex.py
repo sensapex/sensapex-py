@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import ctypes
 import os
 import platform
 import subprocess
@@ -24,10 +25,8 @@ from ctypes import (
     c_ulong,
     c_ushort,
     c_void_p,
-    cdll,
     create_string_buffer,
     pointer,
-    windll,
 )
 from datetime import datetime
 from pathlib import Path
@@ -320,16 +319,16 @@ class UMP(object):
         path = os.path.abspath(os.path.dirname(__file__))
         if sys.platform == "win32":
             if cls._lib_path is not None:
-                return windll.LoadLibrary(os.path.join(cls._lib_path, "libum"))
+                return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, "libum"))
 
             with contextlib.suppress(OSError):
-                return windll.libum
-            return windll.LoadLibrary(os.path.join(path, "libum"))
+                return ctypes.windll.libum
+            return ctypes.windll.LoadLibrary(os.path.join(path, "libum"))
         else:
             if cls._lib_path is not None:
-                return cdll.LoadLibrary(os.path.join(cls._lib_path, "libum.so"))
+                return ctypes.cdll.LoadLibrary(os.path.join(cls._lib_path, "libum.so"))
 
-            return cdll.LoadLibrary(os.path.join(path, "libum.so"))
+            return ctypes.cdll.LoadLibrary(os.path.join(path, "libum.so"))
 
     @classmethod
     def get_um_state_class(cls):

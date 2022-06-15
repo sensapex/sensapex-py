@@ -88,6 +88,10 @@ Thanks to the following for contributions:
 
 ### Changelog
 
+#### 1.022.6
+* More accuracy_test improvements.
+* Handle floating point movements.
+
 #### 1.022.5
 * The accuracy_test script now takes `--linear` to test linear movements.
 

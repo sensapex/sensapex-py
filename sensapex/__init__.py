@@ -1,4 +1,4 @@
 from .sensapex import UMP, SensapexDevice, UMError
 
 
-__version__ = "1.022.5"  # don't forget setup.py
+__version__ = "1.022.6"  # don't forget setup.py and changelog

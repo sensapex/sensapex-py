@@ -210,7 +210,9 @@ class MoveRequest(object):
         mode = int(bool(simultaneous))  # whether all axes move simultaneously
         retval: List[Union[c_int, c_float]] = [c_int(self.dev)]
         retval += [c_float(x) for x in pos4]
-        retval += [c_int(int(x)) for x in speed + [mode] + [max_acceleration]]
+        retval += [c_int(int(x)) for x in speed]
+        retval += [c_int(int(x)) for x in [mode, max_acceleration]]
+        assert len(retval) == 11
         return retval
 
     def interrupt(self, reason):
@@ -631,8 +633,8 @@ class UMP(object):
 
         Returns
         -------
-        move_id : int
-            Unique ID that can be used to retrieve the status of this move at a later time.
+        move_request : MoveRequest
+            Object that can be used to retrieve the status of this move at a later time.
         """
         next_move = MoveRequest(self, dev, dest, speed, simultaneous, linear, max_acceleration, self._retry_threshold)
         with self.lock:

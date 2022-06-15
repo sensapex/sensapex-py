@@ -131,7 +131,7 @@ lastupdate = time.perf_counter()
 
 
 def update(moving=True):
-    global lastupdate
+    global lastupdate, n_axes
     timeout = -1 if args.high_res else 0
     position = dev.get_pos(timeout=timeout)
     s = dev.is_busy()
@@ -148,7 +148,7 @@ def update(moving=True):
     closest_pos = target + np.dot(target_to_pos, target_to_last) * target_to_last
     dist = position - closest_pos
 
-    for i in range(3):
+    for i in range(n_axes):
         pos[i].append((position[i] - start_pos[i]) * 1e-6)
         tgt[i].append((target[i] - start_pos[i]) * 1e-6)
         if moving:
@@ -191,9 +191,11 @@ print("Starting position:", start_pos)
 diffs = []
 errs = []
 positions = []
+n_axes = dev.n_axes()
+assert len(start_pos) == n_axes, f"Starting position {start_pos} has length {len(start_pos)}, but device has {n_axes} axes."
 if args.test_pos is None:
-    moves = np.random.random(size=(args.iter, 3)) * args.distance
-    move_axes = np.array([args.x, args.y, args.z])
+    moves = np.random.random(size=(args.iter, n_axes)) * args.distance
+    move_axes = np.array([args.x, args.y, args.z])[:n_axes]
     assert np.any(move_axes), "No axes selected to move (use --x, --y, --z, or --test-pos)"
     moves[:, ~move_axes] = 0
     targets = np.array(start_pos)[np.newaxis, :] + moves
@@ -236,7 +238,7 @@ for i in range(args.iter):
 update_plots()
 
 dev.goto_pos(start_pos, args.speed)
-print("mean:", np.mean(errs), " max:", np.max(errs))
+print(f"mean: {np.mean(errs) * 1e6:0.2f} um   max: {np.max(errs) * 1e6:0.2f} um")
 
 if sys.flags.interactive == 0:
     app.exec_()

@@ -10,7 +10,8 @@ from sensapex.utils import bytes_str
 
 
 parser = argparse.ArgumentParser(
-    description="Test for sensapex devices; perform a series of random moves while rapidly polling the device position and state."
+    description="Test for sensapex devices; perform a series of random moves while rapidly polling the device position"
+                " and state."
 )
 parser.add_argument("device", type=int, help="Device ID to test")
 parser.add_argument(
@@ -35,7 +36,13 @@ parser.add_argument(
 )
 parser.add_argument("--iter", type=int, default=10, help="Number of positions to test")
 parser.add_argument("--acceleration", type=float, default=0, help="Max speed acceleration")
-parser.add_argument("--retry-threshold", type=float, default=None, dest='retry_threshold', help="Distance error threshold at which to retry a move")
+parser.add_argument(
+    "--retry-threshold",
+    type=float,
+    default=None,
+    dest="retry_threshold",
+    help="Distance error threshold at which to retry a move",
+)
 parser.add_argument(
     "--linear", action="store_true", default=False, dest="linear", help="Move all 3 axes simultaneously"
 )
@@ -192,7 +199,9 @@ diffs = []
 errs = []
 positions = []
 n_axes = dev.n_axes()
-assert len(start_pos) == n_axes, f"Starting position {start_pos} has length {len(start_pos)}, but device has {n_axes} axes."
+assert (
+    len(start_pos) == n_axes
+), f"Starting position {start_pos} has length {len(start_pos)}, but device has {n_axes} axes."
 if args.test_pos is None:
     moves = np.random.random(size=(args.iter, n_axes)) * args.distance
     move_axes = np.array([args.x, args.y, args.z])[:n_axes]
@@ -233,7 +242,10 @@ for i in range(args.iter):
     diffs.append(diff)
     errs.append(np.linalg.norm(diff))
 
-    print(f"{i} attempts: {move_req.attempts}  error: {errs[-1]*1e6:0.2f} um   [{' '.join(['%0.2f'%(x*1e6) for x in diff])}]")
+    print(
+        f"{i} attempts: {move_req.attempts}  error: {errs[-1]*1e6:0.2f} um "
+        f"  [{' '.join(['%0.2f'%(x*1e6) for x in diff])}]"
+    )
 
 update_plots()
 

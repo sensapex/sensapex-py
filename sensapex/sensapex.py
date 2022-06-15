@@ -153,7 +153,10 @@ class MoveRequest(object):
 
         # extend dest to 4 values
         def resize_to_4(arr):
-            return np.array([arr[i] if (i < len(arr) and arr[i] is not None) else np.nan for i in range(4)]).astype(float)
+            return np.array(
+                [arr[i] if (i < len(arr) and arr[i] is not None) else np.nan for i in range(4)]
+            ).astype(float)
+
         dest4 = resize_to_4(dest)
 
         # disable axes that are already close enough to their target

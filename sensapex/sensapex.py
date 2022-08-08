@@ -28,6 +28,7 @@ from ctypes import (
     create_string_buffer,
     pointer,
 )
+from ctypes.util import find_library
 from datetime import datetime
 from pathlib import Path
 from timeit import default_timer
@@ -327,6 +328,8 @@ class UMP(object):
     @classmethod
     def load_lib(cls):
         path = os.path.abspath(os.path.dirname(__file__))
+        if cls._lib_path is None:
+            cls._lib_path = find_library("libum")
         if sys.platform == "win32":
             if cls._lib_path is not None:
                 return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, "libum"))

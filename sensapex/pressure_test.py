@@ -78,13 +78,13 @@ for chan in range(1, 9):
         dev.set_pressure(chan, 0.0)
         for j in range(pre_samples):
             pressure_data.append(dev.measure_pressure(chan))
-            time_vals.append(pg.ptime.time())
+            time_vals.append(time.perf_counter())
             time.sleep(0.001)
-        set_time = pg.ptime.time()
+        set_time = time.perf_counter()
         dev.set_pressure(chan, target_pressure)
         for j in range(post_samples):
             pressure_data.append(dev.measure_pressure(chan))
-            time_vals.append(pg.ptime.time())
+            time_vals.append(time.perf_counter())
             time.sleep(0.001)
         pressure_data = np.array(pressure_data)
         results[i] = [target_pressure, pressure_data[-10:].mean()]

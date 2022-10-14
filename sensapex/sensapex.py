@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import warnings
 from ctypes import (
     CFUNCTYPE,
     POINTER,
@@ -546,7 +547,7 @@ class UMP(object):
     def set_axis_count(self, dev, count):
         self._axis_counts[dev] = count
 
-    def call(self, fn, *args):
+    def call(self, fn, *args, retries: "int | None" = None):
         with self.lock:
             if self.h is None:
                 raise TypeError("UM is not open.")
@@ -564,7 +565,12 @@ class UMP(object):
                     err_msg = f"UM Error: {err:d}: '{errstr}' from {fn}{args!r}"
                     exc = UMError(err_msg, err, None)
                 self._write_debug(err_msg, error=exc)
-                raise exc
+                if retries and retries > 0:
+                    self._write_debug(err_msg)
+                    warnings.warn(err_msg)
+                    return self.call(fn, *args, retries - 1)
+                else:
+                    raise exc
             return rval
 
     def set_max_acceleration(self, dev, max_acc):
@@ -611,7 +617,7 @@ class UMP(object):
         xyzwe = c_float(), c_float(), c_float(), c_float(), c_int()
         timeout = c_int(timeout)
 
-        self.call("um_get_positions", c_int(dev), timeout, *[byref(x) for x in xyzwe])
+        self.call("um_get_positions", c_int(dev), timeout, *[byref(x) for x in xyzwe], retries=1)
 
         n_axes = self.axis_count(dev)
         positions = [x.value for x in xyzwe[:n_axes]]
@@ -683,13 +689,13 @@ class UMP(object):
 
     def get_pressure(self, dev, channel):
         p = c_float()
-        self.call("umc_get_pressure_setting", dev, int(channel), byref(p))
+        self.call("umc_get_pressure_setting", dev, int(channel), byref(p), retries=1)
         self._write_debug(f"pressure setting is {p.value}")
         return p.value
 
     def measure_pressure(self, dev, channel):
         p = c_float()
-        self.call("umc_measure_pressure", dev, int(channel), byref(p))
+        self.call("umc_measure_pressure", dev, int(channel), byref(p), retries=1)
         self._write_debug(f"pressure measured at {p.value}")
         return p.value
 
@@ -919,7 +925,7 @@ class SensapexDevice(object):
         return self.ump.call("ums_set_lens_position", c_int(self.dev_id), c_int(pos), c_float(lift), c_float(dip))
 
     def get_lens_position(self):
-        return self.ump.call("ums_get_lens_position", c_int(self.dev_id))
+        return self.ump.call("ums_get_lens_position", c_int(self.dev_id), retries=3)
 
     def set_custom_slow_speed(self, enabled):
         return self.ump.set_custom_slow_speed(self.dev_id, enabled)

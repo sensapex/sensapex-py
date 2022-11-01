@@ -124,6 +124,9 @@ Thanks to the following for contributions:
 
 ### Changelog
 
+#### 1.022.8
+* Include ACQ4 integration instructions in README
+
 #### 1.022.7
 * Packaging fix to include driver binary.
 * find_library to find libum in default locations.

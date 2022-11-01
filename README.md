@@ -44,6 +44,42 @@ python -m sensapex.accuracy_test <device_id>
 
 Where `<device_id>` should be replaced with the numerical ID of your device, as shown by `python -m sensapex.test`.
 
+#### ACQ4 Integration
+
+Sensapex stages (uMs), manipulators (uMp) and pressure controllers (uMc) are all well integrated into the [ACQ4](http://acq4.org) neurophysiology platform. To access these devices from ACQ4, simply install `sensapex` into your ACQ4 environment and add appropriate configuration. In `default.cfg` add:
+```yaml
+drivers:
+    sensapex:
+        group: 0  # [default] of Group 'A' or whatever numeric index corresponds to your hardware
+        debug: False  # [default] or True to get debug logging as described below
+        address: "169.254.255.255"  # [default] or whatever your hardware's broadcast address is
+        driverPath: None  # [default] to using standard OS library searches or set to a custom location
+```
+
+And in `devices.cfg`, add any number of the following device configuration sections (named distinctly):
+```yaml
+Stage:
+    driver: "Sensapex"
+    nAxes: 3
+    deviceId: 20
+    # ...
+
+ObjectiveChanger:
+    driver: 'SensapexObjectiveChanger'
+    deviceId: 20
+    # ...
+
+Manipulator1:
+    driver: "Sensapex"
+    isManipulator: True
+    deviceId: 1
+    # ...
+
+Pressure1:
+    Driver: "SensapexPressureControl"
+    deviceId: 30
+    pressureChannel: 1
+```
 
 #### Debug
 

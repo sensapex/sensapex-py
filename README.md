@@ -124,6 +124,9 @@ Thanks to the following for contributions:
 
 ### Changelog
 
+#### 1.400.0
+* Update to latest driver
+
 #### 1.022.8
 * Include ACQ4 integration instructions in README
 

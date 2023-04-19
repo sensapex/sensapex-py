@@ -26,13 +26,13 @@ def install_bin(path, force=False):
     """Install libum.dll and umpcli.exe to *path*."""
     if force or platform.system() == "Windows":
         dll_data = download_from_zip(
-            "http://dist.sensapex.com/misc/um-sdk/latest/umsdk-1.022-binaries.zip", ["libum.dll"]
+            "https://github.com/sensapex/umsdk/releases/download/v1.400/umsdk-1.400-binaries.zip", ["x64/libum.dll"]
         )[0]
         print(f"Install libum.dll to {path}")
         with open(os.path.join(path, "libum.dll"), "wb") as install_target:
             install_target.write(dll_data)
         umpcli_data = download_from_zip(
-            "http://dist.sensapex.com/misc/umpcli/umpcli-0_951-beta.zip", ["umpcli-0_951-beta.exe"]
+            "http://dist.sensapex.com/misc/umpcli/umpcli-0_957-beta.zip", ["umpcli-0_957-beta.exe"]
         )[0]
         with open(os.path.join(path, "umpcli.exe"), "wb") as install_target:
             install_target.write(umpcli_data)
@@ -77,5 +77,5 @@ setup(
     packages=find_packages(),
     python_requires=">=3.7",
     url="https://github.com/sensapex/sensapex-py",
-    version="1.022.8",  # in lock step with umsdk version. don't forget __version__ and changelog!
+    version="1.400.0",  # in lock step with umsdk version. don't forget __version__ and changelog!
 )

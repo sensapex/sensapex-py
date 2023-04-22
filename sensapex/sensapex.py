@@ -215,7 +215,7 @@ class MoveRequest(object):
         mode = int(bool(simultaneous))  # whether all axes move simultaneously
         retval: List[Union[c_int, c_float]] = [c_int(self.dev)]
         retval += [c_float(x) for x in pos4]
-        retval += [c_int(int(x)) for x in speed]
+        retval += [c_float(int(x)) for x in speed]
         retval += [c_int(int(x)) for x in [mode, max_acceleration]]
         assert len(retval) == 11
         return retval

@@ -155,7 +155,7 @@ def update(moving=True):
     closest_pos = target + np.dot(target_to_pos, target_to_last) * target_to_last
     dist = position - closest_pos
 
-    for i in range(max(3, n_axes)):
+    for i in range(n_axes):
         pos[i].append((position[i] - start_pos[i]) * 1e-6)
         tgt[i].append((target[i] - start_pos[i]) * 1e-6)
         if moving:
@@ -198,7 +198,7 @@ print("Starting position:", start_pos)
 diffs = []
 errs = []
 positions = []
-n_axes = dev.n_axes()
+n_axes = max(3, dev.n_axes())
 assert (
     len(start_pos) == n_axes
 ), f"Starting position {start_pos} has length {len(start_pos)}, but device has {n_axes} axes."

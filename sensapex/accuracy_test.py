@@ -204,7 +204,7 @@ assert (
 ), f"Starting position {start_pos} has length {len(start_pos)}, but device has {n_axes} axes."
 if args.test_pos is None:
     moves = np.random.random(size=(args.iter, n_axes)) * args.distance
-    move_axes = np.array([args.x, args.y, args.z])[:n_axes]
+    move_axes = np.array([args.x, args.y, args.z, False])[:n_axes]
     assert np.any(move_axes), "No axes selected to move (use --x, --y, --z, or --test-pos)"
     moves[:, ~move_axes] = 0
     targets = np.array(start_pos)[np.newaxis, :] + moves
@@ -227,7 +227,9 @@ if args.retry_threshold is not None:
 for i in range(args.iter):
     target = targets[i]
     last_position_before_move = dev.get_pos()
-    move_req = dev.goto_pos(target, speed=speeds[i], linear=args.linear, max_acceleration=args.acceleration)
+    move_req = dev.goto_pos(
+        target, speed=speeds[i], linear=args.linear, simultaneous=args.linear, max_acceleration=args.acceleration
+    )
     while not move_req.finished:
         update(moving=True)
         time.sleep(0.002)

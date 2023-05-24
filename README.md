@@ -126,6 +126,7 @@ Thanks to the following for contributions:
 
 #### 1.400.0
 * Update to latest driver
+* Accuracy test for 4-axis devices (ignoring the 4th axis)
 
 #### 1.022.8
 * Include ACQ4 integration instructions in README

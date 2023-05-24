@@ -155,7 +155,7 @@ def update(moving=True):
     closest_pos = target + np.dot(target_to_pos, target_to_last) * target_to_last
     dist = position - closest_pos
 
-    for i in range(n_axes):
+    for i in range(max(3, n_axes)):
         pos[i].append((position[i] - start_pos[i]) * 1e-6)
         tgt[i].append((target[i] - start_pos[i]) * 1e-6)
         if moving:

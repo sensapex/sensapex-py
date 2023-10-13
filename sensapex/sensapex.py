@@ -386,8 +386,8 @@ class UMP(object):
         self._dev_ids_seen = set()
         self._set_debug_mode(self._debug)
 
-        min_version = (1, 21)
-        max_version = (1, 400)
+        min_version = (1, 400)
+        max_version = (1, 410)
         version_str = self.sdk_version()
         version = tuple(map(int, version_str.lstrip(b"v").split(b".")))
 
@@ -824,6 +824,15 @@ class UMP(object):
         """
         self.call("um_ping", c_int(dev_id))
 
+    def pm_take_raw_step(self, dev_id,
+                         freq_x, freq_y, freq_z,
+                         steps_x, steps_y, steps_z,
+                         microsteps_x, microsteps_y, microsteps_z):
+
+        self.call("pm_take_raw_step", c_int(dev_id),
+                  c_int(freq_x), c_int(freq_y), c_int(freq_z),
+                  c_int(steps_x), c_int(steps_y), c_int(steps_z),
+                  c_int(microsteps_x), c_int(microsteps_y), c_int(microsteps_z))
 
 class SensapexDevice(object):
     """UM wrapper for accessing a single sensapex device.
@@ -954,6 +963,15 @@ class SensapexDevice(object):
     def set_soft_start_value(self, value):
         return self.ump.set_soft_start_value(self.dev_id, value)
 
+    def pm_take_raw_step(self,
+                         freq_x, freq_y, freq_z,
+                         steps_x, steps_y, steps_z,
+                         microsteps_x, microsteps_y, microsteps_z):
+
+        return self.ump.pm_take_raw_step(self.dev_id,
+                                         freq_x, freq_y, freq_z,
+                                         steps_x, steps_y, steps_z,
+                                         microsteps_x, microsteps_y, microsteps_z)
 
 class PollThread(threading.Thread):
     """Thread to poll for all manipulator position changes.

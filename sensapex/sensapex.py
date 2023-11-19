@@ -291,7 +291,7 @@ def timer():
 
 class UMP(object):
     """Wrapper for the Sensapex uMp API.
-    
+
     All calls except get_ump are thread-safe.
     """
 
@@ -329,20 +329,27 @@ class UMP(object):
     @classmethod
     def load_lib(cls):
         path = os.path.abspath(os.path.dirname(__file__))
+        lib_filename = "libum"
+
         if cls._lib_path is None:
-            cls._lib_path = find_library("libum")
+            cls._lib_path = find_library(lib_filename)
+
         if sys.platform == "win32":
-            if cls._lib_path is not None:
-                return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, "libum"))
-
-            with contextlib.suppress(OSError):
-                return ctypes.windll.libum
-            return ctypes.windll.LoadLibrary(os.path.join(path, "libum"))
+            lib_extension = ".dll"
+            lib_loader = ctypes.windll
+        elif sys.platform == "darwin":
+            lib_extension = ".dylib"
+            lib_loader = ctypes.cdll
         else:
-            if cls._lib_path is not None:
-                return ctypes.cdll.LoadLibrary(os.path.join(cls._lib_path, "libum.so"))
+            lib_extension = ".so"
+            lib_loader = ctypes.cdll
 
-            return ctypes.cdll.LoadLibrary(os.path.join(path, "libum.so"))
+        if cls._lib_path is not None:
+            lib_path = os.path.join(cls._lib_path, lib_filename + lib_extension)
+        else:
+            lib_path = os.path.join(path, lib_filename + lib_extension)
+
+        return lib_loader.LoadLibrary(lib_path)
 
     @classmethod
     def get_um_state_class(cls):
@@ -387,7 +394,7 @@ class UMP(object):
         self._set_debug_mode(self._debug)
 
         min_version = (1, 21)
-        max_version = (1, 400)
+        max_version = (1, 401)
         version_str = self.sdk_version()
         version = tuple(map(int, version_str.lstrip(b"v").split(b".")))
 
@@ -578,7 +585,7 @@ class UMP(object):
 
     def open(self, address, group):
         """Open the UM devices at the given address.
-        
+
         The default address "169.254.255.255" should suffice in most situations.
         """
         if self.h is not None:
@@ -608,7 +615,7 @@ class UMP(object):
 
     def get_pos(self, dev, timeout=0):
         """Return the absolute position of the specified device (in um).
-        
+
         If *timeout* == 0, then the position is returned directly from cache
         and not queried from the device.
         """
@@ -818,7 +825,7 @@ class UMP(object):
         return tuple(version)
 
     def ping_device(self, dev_id):
-        """Ping a device. 
+        """Ping a device.
 
         Returns after ping is received, or raises an exception on timeout.
         """
@@ -829,10 +836,10 @@ class SensapexDevice(object):
     """UM wrapper for accessing a single sensapex device.
 
     Example:
-    
+
         dev = SensapexDevice(1)  # get handle to manipulator 1
         pos = dev.get_pos()
-        pos[0] += 10000  # add 10 um to x axis 
+        pos[0] += 10000  # add 10 um to x axis
         dev.goto_pos(pos, speed=10)
     """
 

@@ -153,9 +153,9 @@ class MoveRequest(object):
 
         # extend dest to 4 values
         def resize_to_4(arr):
-            return np.array(
-                [arr[i] if (i < len(arr) and arr[i] is not None) else np.nan for i in range(4)]
-            ).astype(float)
+            return np.array([arr[i] if (i < len(arr) and arr[i] is not None) else np.nan for i in range(4)]).astype(
+                float
+            )
 
         dest4 = resize_to_4(dest)
 
@@ -359,19 +359,19 @@ class UMP(object):
         return cls._um_state
 
     @classmethod
-    def get_ump(cls, address=None, group=None, start_poller=True) -> UMP:
-        """Return a singleton UM instance.
-        """
+    def get_ump(cls, address=None, group=None, start_poller=True, handle_atexit=True) -> UMP:
+        """Return a singleton UM instance."""
         if address is None:
             address = cls._default_address
         if group is None:
             group = cls._default_group
         # question: can we have multiple UM instances with different address/group ?
         if cls._single is None:
-            cls._single = UMP(address=address, group=group, start_poller=start_poller)
+            cls._single = UMP(address=address, group=group, start_poller=start_poller, handle_atexit=handle_atexit)
         return cls._single
 
-    def __init__(self, address, group, start_poller=True):
+    def __init__(self, address, group, start_poller=True, handle_atexit=True):
+        self._handle_atexit = handle_atexit
         self.broadcast_address = address.decode()
         self.lock = threading.RLock()
         if self._single is not None:
@@ -599,7 +599,8 @@ class UMP(object):
         if ptr <= 0:
             raise RuntimeError("Error connecting to UM:", self.lib.um_errorstr(ptr))
         self.h = pointer(self.get_um_state_class().from_address(ptr))
-        atexit.register(self.close)
+        if self._handle_atexit:
+            atexit.register(self.close)
 
     def close(self):
         """Close the UM device."""

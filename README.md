@@ -124,6 +124,9 @@ Thanks to the following for contributions:
 
 ### Changelog
 
+#### 1.400.4
+* Add init arg `handle_atexit` to disable automatic cleanup on exit.
+
 #### 1.400.3
 * Bump up minimum SDK version
 

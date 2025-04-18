@@ -1,15 +1,5 @@
 from __future__ import annotations
 
-import atexit
-import contextlib
-import ctypes
-import os
-import platform
-import subprocess
-import sys
-import threading
-import time
-import warnings
 from ctypes import (
     CFUNCTYPE,
     POINTER,
@@ -29,14 +19,24 @@ from ctypes import (
     create_string_buffer,
     pointer,
 )
+
+import atexit
+import contextlib
+import ctypes
+import numpy as np
+import os
+import platform
+import subprocess
+import sys
+import threading
+import time
+import warnings
 from ctypes.util import find_library
 from datetime import datetime
 from pathlib import Path
 from timeit import default_timer
 from traceback import format_stack
 from typing import Dict, List, Union
-
-import numpy as np
 
 if sys.platform == "win32":
     DUMPCAP = r"C:\Program Files\Wireshark\dumpcap.exe"
@@ -122,13 +122,11 @@ class um_state(Structure):
 
 
 class MoveRequest(object):
-    """Class for coordinating and tracking moves.
-    """
+    """Class for coordinating and tracking moves."""
 
     max_attempts = 3
 
     def __init__(self, ump, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, retry_threshold=0.4):
-
         self._next_move_index = 0
         self._last_pos_exception = None
         self.dev = dev
@@ -190,11 +188,12 @@ class MoveRequest(object):
             if ump.get_device(dev).is_stage:
                 self._moves = (
                     self._movement_args(
-                        max_acceleration, (dest4[0], float("nan"), float("nan"), float("nan")), speed, simultaneous),
+                        max_acceleration, (dest4[0], float("nan"), float("nan"), float("nan")), speed, simultaneous
+                    ),
                     self._movement_args(
-                        max_acceleration, (float("nan"), dest4[1], float("nan"), float("nan")), speed, simultaneous),
-                    self._movement_args(
-                        max_acceleration, dest4, speed, simultaneous),
+                        max_acceleration, (float("nan"), dest4[1], float("nan"), float("nan")), speed, simultaneous
+                    ),
+                    self._movement_args(max_acceleration, dest4, speed, simultaneous),
                 )
             elif self.start_pos[0] < dest4[0]:  # manipulator starting behind the dest means insertion
                 just_y = dest4[:]
@@ -300,7 +299,7 @@ def timer():
 
 class UMP(object):
     """Wrapper for the Sensapex uMp API.
-    
+
     All calls except get_ump are thread-safe.
     """
 
@@ -402,10 +401,14 @@ class UMP(object):
 
         if version < min_version:
             min_version_str = "v{:d}.{:03d}".format(*min_version)
-            raise RuntimeError(f"SDK version {min_version_str} or later required (your version is {version_str} in {self.lib._name})")
+            raise RuntimeError(
+                f"SDK version {min_version_str} or later required (your version is {version_str} in {self.lib._name})"
+            )
         if version > max_version:
             max_version_str = "v{:d}.{:03d}".format(*max_version)
-            raise RuntimeError(f"SDK version {max_version_str} or lower required (your version is {version_str} in {self.lib._name})")
+            raise RuntimeError(
+                f"SDK version {max_version_str} or lower required (your version is {version_str} in {self.lib._name})"
+            )
 
         self.h = None
         self.open(address=address, group=group)
@@ -529,14 +532,12 @@ class UMP(object):
         return self.devices[dev_id]
 
     def sdk_version(self):
-        """Return version of UM SDK.
-        """
+        """Return version of UM SDK."""
         self.lib.um_get_version.restype = c_char_p
         return self.lib.um_get_version()
 
     def list_devices(self, max_id=50):
-        """Return a list of all connected device IDs.
-        """
+        """Return a list of all connected device IDs."""
         devarray = (c_int * max_id)()
         r = self.call("um_get_device_list", byref(devarray), c_int(max_id))
         devs = [devarray[i] for i in range(r)]
@@ -587,7 +588,7 @@ class UMP(object):
 
     def open(self, address, group):
         """Open the UM devices at the given address.
-        
+
         The default address "169.254.255.255" should suffice in most situations.
         """
         if self.h is not None:
@@ -601,8 +602,7 @@ class UMP(object):
         atexit.register(self.close)
 
     def close(self):
-        """Close the UM device.
-        """
+        """Close the UM device."""
         if self.poller.is_alive():
             self.poller.stop()
             self.poller.join()
@@ -617,7 +617,7 @@ class UMP(object):
 
     def get_pos(self, dev, timeout=0):
         """Return the absolute position of the specified device (in um).
-        
+
         If *timeout* == 0, then the position is returned directly from cache
         and not queried from the device.
         """
@@ -685,8 +685,7 @@ class UMP(object):
                 return False
 
     def stop(self, dev):
-        """Stop the specified manipulator.
-        """
+        """Stop the specified manipulator."""
         with self.lock:
             self.call("um_stop", c_int(dev))
             move = self._last_move.pop(dev, None)
@@ -781,8 +780,7 @@ class UMP(object):
         self._retry_threshold = threshold
 
     def recv_all(self):
-        """Receive all queued position/status update packets and update any pending moves.
-        """
+        """Receive all queued position/status update packets and update any pending moves."""
         self.call("um_receive", 0)
         self._update_moves()
 
@@ -820,14 +818,13 @@ class UMP(object):
     #         self._write_debug(f"Ping scan could net reach {missing!r}")
 
     def get_firmware_version(self, dev_id):
-        """Return the firmware version installed on a device.
-        """
+        """Return the firmware version installed on a device."""
         version = (c_int * 5)()
         self.call("um_read_version", c_int(dev_id), byref(version), c_int(5))
         return tuple(version)
 
     def ping_device(self, dev_id):
-        """Ping a device. 
+        """Ping a device.
 
         Returns after ping is received, or raises an exception on timeout.
         """
@@ -838,10 +835,10 @@ class SensapexDevice(object):
     """UM wrapper for accessing a single sensapex device.
 
     Example:
-    
+
         dev = SensapexDevice(1)  # get handle to manipulator 1
         pos = dev.get_pos()
-        pos[0] += 10000  # add 10 um to x axis 
+        pos[0] += 10000  # add 10 um to x axis
         dev.goto_pos(pos, speed=10)
     """
 

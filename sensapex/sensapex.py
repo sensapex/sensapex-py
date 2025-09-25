@@ -23,6 +23,7 @@ from ctypes import (
 import atexit
 import contextlib
 import ctypes
+import traceback
 import numpy as np
 import os
 import platform
@@ -126,9 +127,11 @@ class MoveRequest(object):
 
     max_attempts = 3
 
-    def __init__(self, ump, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, retry_threshold=0.4):
+    def __init__(self, ump, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, retry_threshold=0.4, name=None):
+        self._stack = traceback.StackSummary.extract(traceback.walk_stack(None))
         self._next_move_index = 0
         self._last_pos_exception = None
+        self.name = name
         self.dev = dev
         self.finished = False
         self.finished_event = threading.Event()
@@ -634,7 +637,7 @@ class UMP(object):
         self._write_debug(f"positions: {positions!r}")
         return positions
 
-    def goto_pos(self, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0):
+    def goto_pos(self, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, name=None):
         """Request the specified device to move to an absolute position (in um).
 
         Parameters
@@ -652,17 +655,20 @@ class UMP(object):
             If True, then axis speeds are scaled to produce more linear movement, requires simultaneous
         max_acceleration : int
             Maximum acceleration in um/s^2
+        name : str | None
+            Optional decription of the reason for this move, used in logging and error messages
 
         Returns
         -------
         move_request : MoveRequest
             Object that can be used to retrieve the status of this move at a later time.
         """
-        next_move = MoveRequest(self, dev, dest, speed, simultaneous, linear, max_acceleration, self._retry_threshold)
+        next_move = MoveRequest(self, dev, dest, speed, simultaneous, linear, max_acceleration, self._retry_threshold, name=name)
         with self.lock:
-            last_move = self._last_move.pop(dev, None)
+            last_move = self._last_move.get(dev, None)
             if last_move is not None:
-                last_move.interrupt("started another move before the previous finished")
+                name = '' if name is None else f' ({name})'
+                last_move.interrupt(f"started another move before the previous finished{name}")
 
             self._last_move[dev] = next_move
 
@@ -685,13 +691,14 @@ class UMP(object):
             else:
                 return False
 
-    def stop(self, dev):
+    def stop(self, dev, reason=None):
         """Stop the specified manipulator."""
         with self.lock:
             self.call("um_stop", c_int(dev))
             move = self._last_move.pop(dev, None)
             if move is not None:
-                move.interrupt("stop requested before move finished")
+                reason = '' if reason is None else f' ({reason})'
+                move.interrupt(f"stop requested before move finished{reason}")
 
     def set_pressure(self, dev, channel, value):
         return self.call("umc_set_pressure_setting", dev, int(channel), c_float(value))
@@ -879,9 +886,9 @@ class SensapexDevice(object):
     def get_pos(self, timeout=None):
         return self.ump.get_pos(self.dev_id, timeout=timeout)
 
-    def goto_pos(self, pos, speed, simultaneous=True, linear=False, max_acceleration=0):
+    def goto_pos(self, pos, speed, simultaneous=True, linear=False, max_acceleration=0, name=None):
         return self.ump.goto_pos(
-            self.dev_id, pos, speed, simultaneous=simultaneous, linear=linear, max_acceleration=max_acceleration
+            self.dev_id, pos, speed, simultaneous=simultaneous, linear=linear, max_acceleration=max_acceleration, name=name
         )
 
     @property
@@ -893,8 +900,8 @@ class SensapexDevice(object):
     def is_busy(self):
         return self.ump.is_busy(self.dev_id)
 
-    def stop(self):
-        return self.ump.stop(self.dev_id)
+    def stop(self, reason=None):
+        return self.ump.stop(self.dev_id, reason=reason)
 
     def _change_callback(self, dev_id, new_pos, old_pos):
         for cb in self.callbacks:

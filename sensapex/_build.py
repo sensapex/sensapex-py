@@ -25,6 +25,7 @@ UMPCLI_MEMBERS = ["umpcli.exe"]
 UMPCLI_ENV = "SENSAPEX_UMPCLI_ARCHIVE"
 
 FORCE_BINARIES_ENV = "SENSAPEX_FORCE_WINDOWS_BINARIES"
+SKIP_BUILD_BINARIES_ENV = "SENSAPEX_SKIP_BUILD_WINDOWS_BINARIES"
 
 CACHE_DIR = Path(
     os.environ.get(
@@ -40,7 +41,7 @@ class DownloadBinariesAndInstall(install):
 
     def run(self):
         super().run()
-        install_bin(Path(self.install_purelib) / "sensapex", force=_force_binary_download())
+        install_bin(Path(self.install_purelib) / "sensapex", force=_should_install_runtime_binaries())
 
 
 class DownloadBinariesAndDevelop(develop):
@@ -48,7 +49,7 @@ class DownloadBinariesAndDevelop(develop):
 
     def run(self):
         super().run()
-        install_bin(Path(self.egg_path) / "sensapex", force=_force_binary_download())
+        install_bin(Path(self.egg_path) / "sensapex", force=_should_install_runtime_binaries())
 
 
 class DownloadBinariesAndBuild(build_py):
@@ -56,7 +57,7 @@ class DownloadBinariesAndBuild(build_py):
 
     def run(self):
         super().run()
-        install_bin(Path(self.build_lib) / "sensapex", force=_force_binary_download())
+        install_bin(Path(self.build_lib) / "sensapex", force=_should_bundle_build_binaries())
 
 
 def install_bin(path: Path, force: bool = False) -> None:
@@ -124,10 +125,23 @@ def _download_url(url: str) -> bytes:
         raise RuntimeError(f"Unable to download {url}: {exc}") from exc
 
 
-def _force_binary_download() -> bool:
-    """Return True when downloads should be attempted on non-Windows hosts."""
+def _should_install_runtime_binaries() -> bool:
+    """Return True when binaries should be installed into site-packages."""
     env_value = os.environ.get(FORCE_BINARIES_ENV)
-    if env_value is None:
-        return False
+    if env_value is not None:
+        return _env_value_truthy(env_value)
 
-    return env_value.strip().lower() in {"1", "true", "yes", "on"}
+    return platform.system() == "Windows"
+
+
+def _should_bundle_build_binaries() -> bool:
+    """Return True when linux builds should package the Windows binaries."""
+    env_value = os.environ.get(SKIP_BUILD_BINARIES_ENV)
+    if env_value is not None:
+        return not _env_value_truthy(env_value)
+
+    return True
+
+
+def _env_value_truthy(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}

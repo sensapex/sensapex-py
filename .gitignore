@@ -2,3 +2,7 @@ build/
 dist/
 *.egg-info
 *.pyc
+sensapex-debug/
+sensapex/libum.so
+umpcli*.zip
+umsdk*.zip

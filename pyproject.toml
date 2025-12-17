@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sensapex"
-version = "1.400.4"
+version = "1.504.0"
 description = "Python wrapper for the Sensapex SDK"
 readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.7"

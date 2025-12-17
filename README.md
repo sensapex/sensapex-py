@@ -113,7 +113,7 @@ and append to the log file. These can be sent to
 
 ### Authorship
 
-Copyright (c) 2016-2021 Sensapex Oy
+Copyright (c) 2016-2025 Sensapex Oy
 
 Thanks to the following for contributions:
 
@@ -123,6 +123,11 @@ Thanks to the following for contributions:
 * Thomas Braun
 
 ### Changelog
+
+#### 1.504.0
+* Update to latest SDK
+* Use pyproject.toml for packaging
+* Add reason-for-action options to improve error messages
 
 #### 1.400.4
 * Add init arg `handle_atexit` to disable automatic cleanup on exit.

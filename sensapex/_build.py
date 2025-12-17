@@ -1,4 +1,4 @@
-"""Custom setuptools commands for downloading required Sensapex binaries."""
+"""Utilities for downloading required Sensapex SDK binaries."""
 
 from __future__ import annotations
 
@@ -10,10 +10,6 @@ from typing import Iterable, List
 from urllib.parse import urlparse
 from zipfile import ZipFile
 import urllib.request
-
-from setuptools.command.build_py import build_py
-from setuptools.command.develop import develop
-from setuptools.command.install import install
 
 
 if platform.system() == "Windows":
@@ -34,8 +30,6 @@ UMPCLI_URL = "http://dist.sensapex.com/misc/umpcli/umpcli-0_957-beta.zip"
 UMPCLI_MEMBERS = ["umpcli.exe"]
 UMPCLI_ENV = "SENSAPEX_UMPCLI_ARCHIVE"
 
-FORCE_BINARIES_ENV = "SENSAPEX_FORCE_WINDOWS_BINARIES"
-
 CACHE_DIR = Path(
     os.environ.get(
         "SENSAPEX_DRIVER_CACHE",
@@ -45,31 +39,7 @@ CACHE_DIR = Path(
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-class DownloadBinariesAndInstall(install):
-    """pip install ."""
-
-    def run(self):
-        super().run()
-        install_bin(Path(self.install_purelib) / "sensapex", force=_force_binary_download())
-
-
-class DownloadBinariesAndDevelop(develop):
-    """pip install -e ."""
-
-    def run(self):
-        super().run()
-        install_bin(Path(self.egg_path) / "sensapex", force=_force_binary_download())
-
-
-class DownloadBinariesAndBuild(build_py):
-    """python -m build"""
-
-    def run(self):
-        super().run()
-        install_bin(Path(self.build_lib) / "sensapex", force=_force_binary_download())
-
-
-def install_bin(path: Path, force: bool = False) -> None:
+def install_bin(path: Path) -> None:
     """Install platform-specific libum library (dll/dylib/so) to *path*."""
     # Check if platform is supported
     if UMSDK_URL is None:
@@ -146,12 +116,3 @@ def _download_url(url: str) -> bytes:
             return req.read()
     except Exception as exc:  # pragma: no cover - best effort error reporting
         raise RuntimeError(f"Unable to download {url}: {exc}") from exc
-
-
-def _force_binary_download() -> bool:
-    """Return True when downloads should be attempted on non-Windows hosts."""
-    env_value = os.environ.get(FORCE_BINARIES_ENV)
-    if env_value is None:
-        return False
-
-    return env_value.strip().lower() in {"1", "true", "yes", "on"}

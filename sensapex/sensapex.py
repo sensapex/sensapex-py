@@ -398,7 +398,7 @@ class UMP(object):
         self._set_debug_mode(self._debug)
 
         min_version = (1, 32)
-        max_version = (1, 400)
+        max_version = (1, 504)
         version_str = self.sdk_version()
         version = tuple(map(int, version_str.lstrip(b"v").split(b".")))
 

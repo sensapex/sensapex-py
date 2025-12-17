@@ -341,14 +341,14 @@ class UMP(object):
     def load_lib(cls):
         path = os.path.abspath(os.path.dirname(__file__))
         if cls._lib_path is None:
-            cls._lib_path = find_library("libum")
+            cls._lib_path = find_library("um") or find_library("libum")
         if sys.platform == "win32":
             if cls._lib_path is not None:
-                return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, "libum"))
+                return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, "um"))
 
             with contextlib.suppress(OSError, AttributeError):
                 return ctypes.windll.libum
-            return ctypes.windll.LoadLibrary(os.path.join(path, "libum"))
+            return ctypes.windll.LoadLibrary(os.path.join(path, "um"))
         else:
             if cls._lib_path is not None:
                 return ctypes.cdll.LoadLibrary(os.path.join(cls._lib_path, "libum.so"))

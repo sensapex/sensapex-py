@@ -53,7 +53,7 @@ def install_bin(path: Path) -> None:
 
     # Determine the output filename based on platform
     if platform.system() == "Windows":
-        lib_filename = "libum.dll"
+        lib_filename = "um.dll"
     elif platform.system() == "Darwin":
         lib_filename = "libum.dylib"
     else:  # Linux

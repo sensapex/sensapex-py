@@ -70,17 +70,31 @@ class DownloadBinariesAndBuild(build_py):
 
 
 def install_bin(path: Path, force: bool = False) -> None:
-    """Install libum.dll and umpcli.exe to *path*."""
-    if not force and platform.system() != "Windows":
+    """Install platform-specific libum library (dll/dylib/so) to *path*."""
+    # Check if platform is supported
+    if UMSDK_URL is None:
+        print(f"Warning: Sensapex SDK is not available for {platform.system()} {platform.machine()}")
         return
 
     path.mkdir(parents=True, exist_ok=True)
 
+    # Download and extract the platform-specific library
     dll_data = download_from_zip(UMSDK_URL, UMSDK_MEMBERS, env_var=UMSDK_ENV)[0]
-    (path / "libum.dll").write_bytes(dll_data)
 
-    umpcli_data = download_from_zip(UMPCLI_URL, UMPCLI_MEMBERS, env_var=UMPCLI_ENV)[0]
-    (path / "umpcli.exe").write_bytes(umpcli_data)
+    # Determine the output filename based on platform
+    if platform.system() == "Windows":
+        lib_filename = "libum.dll"
+    elif platform.system() == "Darwin":
+        lib_filename = "libum.dylib"
+    else:  # Linux
+        lib_filename = "libum.so"
+
+    (path / lib_filename).write_bytes(dll_data)
+
+    # Only download umpcli on Windows
+    if platform.system() == "Windows":
+        umpcli_data = download_from_zip(UMPCLI_URL, UMPCLI_MEMBERS, env_var=UMPCLI_ENV)[0]
+        (path / "umpcli.exe").write_bytes(umpcli_data)
 
 
 def download_from_zip(url: str, files: List[str], env_var: str | None = None) -> List[bytes]:

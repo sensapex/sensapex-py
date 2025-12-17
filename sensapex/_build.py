@@ -16,8 +16,18 @@ from setuptools.command.develop import develop
 from setuptools.command.install import install
 
 
-UMSDK_DLL_URL = "https://github.com/sensapex/umsdk/releases/download/v1.400/umsdk-1.400-binaries.zip"
-UMSDK_DLL_MEMBERS = ["umsdk-1.400-binaries/x64/libum.dll"]
+if platform.system() == "Windows":
+    UMSDK_URL = "https://github.com/sensapex/umsdk/releases/download/v1.504/umsdk_Windows_X64_gcc_v1.504.3_Release.zip"
+    UMSDK_MEMBERS = ["bin/um.dll"]
+elif platform.system() == "Darwin" and platform.machine() == "arm64":
+    UMSDK_URL = "https://github.com/sensapex/umsdk/releases/download/v1.504/umsdk_macOS_ARM64_gcc_v1.504.3_Release.zip"
+    UMSDK_MEMBERS = ["bin/shared/libum.dylib"]
+elif platform.system() == "Linux" and platform.machine() == "x86_64":
+    UMSDK_URL = "https://github.com/sensapex/umsdk/releases/download/v1.504/umsdk_Linux_X64_gcc_v1.504.3_Release.zip"
+    UMSDK_MEMBERS = ["bin/shared/libum.so"]
+else:
+    UMSDK_URL = None  # Unsupported platform
+
 UMSDK_ENV = "SENSAPEX_UMSDK_ARCHIVE"
 
 UMPCLI_URL = "http://dist.sensapex.com/misc/umpcli/umpcli-0_957-beta.zip"
@@ -66,7 +76,7 @@ def install_bin(path: Path, force: bool = False) -> None:
 
     path.mkdir(parents=True, exist_ok=True)
 
-    dll_data = download_from_zip(UMSDK_DLL_URL, UMSDK_DLL_MEMBERS, env_var=UMSDK_ENV)[0]
+    dll_data = download_from_zip(UMSDK_URL, UMSDK_MEMBERS, env_var=UMSDK_ENV)[0]
     (path / "libum.dll").write_bytes(dll_data)
 
     umpcli_data = download_from_zip(UMPCLI_URL, UMPCLI_MEMBERS, env_var=UMPCLI_ENV)[0]

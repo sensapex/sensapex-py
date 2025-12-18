@@ -340,20 +340,36 @@ class UMP(object):
     @classmethod
     def load_lib(cls):
         path = os.path.abspath(os.path.dirname(__file__))
-        if cls._lib_path is None:
-            cls._lib_path = find_library("um") or find_library("libum")
-        if sys.platform == "win32":
-            if cls._lib_path is not None:
-                return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, "um"))
 
+        if sys.platform == "win32":
+            # Try package directory first (where pip install puts um.dll)
+            package_lib = os.path.join(path, "um.dll")
+            if os.path.exists(package_lib):
+                return ctypes.windll.LoadLibrary(package_lib)
+
+            # Fall back to find_library (searches PATH and registry)
+            if cls._lib_path is None:
+                cls._lib_path = find_library("um") or find_library("libum")
+            if cls._lib_path is not None:
+                return ctypes.windll.LoadLibrary(cls._lib_path)
+
+            # Last resort: try loading by name
             with contextlib.suppress(OSError, AttributeError):
                 return ctypes.windll.libum
             return ctypes.windll.LoadLibrary(os.path.join(path, "um"))
         else:
-            if cls._lib_path is not None:
-                return ctypes.cdll.LoadLibrary(os.path.join(cls._lib_path, "libum.so"))
+            # Try package directory first
+            package_lib = os.path.join(path, "libum.so")
+            if os.path.exists(package_lib):
+                return ctypes.cdll.LoadLibrary(package_lib)
 
-            return ctypes.cdll.LoadLibrary(os.path.join(path, "libum.so"))
+            # Fall back to find_library
+            if cls._lib_path is None:
+                cls._lib_path = find_library("um") or find_library("libum")
+            if cls._lib_path is not None:
+                return ctypes.cdll.LoadLibrary(cls._lib_path)
+
+            return ctypes.cdll.LoadLibrary(package_lib)
 
     @classmethod
     def get_um_state_class(cls):

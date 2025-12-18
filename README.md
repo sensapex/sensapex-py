@@ -124,7 +124,7 @@ Thanks to the following for contributions:
 
 ### Changelog
 
-#### 1.504.0
+#### 1.504.1
 * Update to latest SDK
 * Use pyproject.toml for packaging
 * Add reason-for-action options to improve error messages

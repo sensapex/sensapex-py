@@ -17,16 +17,26 @@ class TestMoveRequest(TestCase):
         self.mock_ump.get_pos = Mock(return_value=self.start_pos)
         self.mock_ump.call = Mock()
 
-    def _ctyped_args(self, *args):
-        as_ctypes = []
-        for a in args:
-            if isinstance(a, float):
-                as_ctypes.append(c_float(a))
-            else:
-                as_ctypes.append(c_int(a))
-        return as_ctypes
+    def assertCTypesArgsEqual(self, actual_args, expected_values, msg=None):
+        """Assert that ctypes arguments match expected Python values.
 
-    @skip("ctypes args never equal each other, but hand-checking confirms this works")
+        Args:
+            actual_args: tuple of ctypes objects from mock.call_args
+            expected_values: list of expected Python values (int, float, or nan)
+            msg: optional message prefix for failure output
+        """
+        self.assertEqual(len(actual_args), len(expected_values),
+            f"Argument count mismatch: expected {len(expected_values)}, got {len(actual_args)}")
+
+        for i, (actual, expected) in enumerate(zip(actual_args, expected_values)):
+            actual_val = actual.value
+            if np.isnan(expected):
+                self.assertTrue(np.isnan(actual_val),
+                    f"Arg {i}: expected nan, got {actual_val}")
+            else:
+                self.assertEqual(actual_val, expected,
+                    f"Arg {i}: expected {expected}, got {actual_val}")
+
     def test_start_sends_proper_args(self):
         dest = (4., 1., 1.)
         speed = 2
@@ -34,11 +44,10 @@ class TestMoveRequest(TestCase):
         move = MoveRequest(self.mock_ump, self.dev_id, dest, speed, simultaneous=True)
         self.mock_ump.call.assert_not_called()
         move.start()
-        args = self._ctyped_args(
-            self.dev_id, dest[0], dest[1], dest[2], np.NaN, speed, speed, speed, speed, mode, self.max_accel,
-        )
-        # MC: Waa! this test is broken. manual check shows identical args.
-        self.mock_ump.call.assert_called_with("um_goto_position_ext", *args)
+        actual_call_args = self.mock_ump.call.call_args[0][1:]  # skip "um_goto_position_ext"
+        self.assertCTypesArgsEqual(actual_call_args, [
+            self.dev_id, dest[0], dest[1], dest[2], np.nan, speed, speed, speed, speed, mode, self.max_accel,
+        ])
 
     def test_simultaneous_moves_do_not_have_more_calls_to_make(self):
         dest = (4., 1., 1.)
@@ -58,6 +67,7 @@ class TestMoveRequest(TestCase):
         move.make_next_call()
         self.assertFalse(move.has_more_calls_to_make())
 
+    @skip("Not implemented yet")
     def test_nonsimultaneous_only_move_for_changed_values(self):
         dest = (self.start_pos[0], 1., 1.)
         speed = 2
@@ -67,52 +77,58 @@ class TestMoveRequest(TestCase):
         move.make_next_call()
         self.assertFalse(move.has_more_calls_to_make())
 
-    @skip("ctypes args never equal each other, but hand-checking confirms this works")
     def test_xzy_first_for_extraction(self):
+        self.mock_ump.get_device.return_value.is_stage = False
         dest = (-4., 1., 1.)
-        speed = 2
+        speed = 2.0
         mode = 0
         move = MoveRequest(self.mock_ump, self.dev_id, dest, speed, simultaneous=False)
-        move.start()
-        args = self._ctyped_args(
-            self.dev_id, dest[0], self.start_pos[1], self.start_pos[2], np.NaN, speed, speed, speed, speed, mode, self.max_accel,
-        )
-        # MC: Waa! this test is broken. manual check shows identical args.
-        # self.mock_ump.call.assert_called_with("um_goto_position_ext", *args)
-        move.make_next_call()
-        args = self._ctyped_args(
-            self.dev_id, dest[0], self.start_pos[1], dest[2], np.NaN, speed, speed, speed, speed, mode, self.max_accel,
-        )
-        # MC: Waa! this test is broken. manual check shows identical args.
-        self.mock_ump.call.assert_called_with("um_goto_position_ext", *args)
-        move.make_next_call()
-        args = self._ctyped_args(
-            self.dev_id, dest[0], dest[1], dest[2], np.NaN, speed, speed, speed, speed, mode, self.max_accel,
-        )
-        # MC: Waa! this test is broken. manual check shows identical args.
-        self.mock_ump.call.assert_called_with("um_goto_position_ext", *args)
 
-    @skip("ctypes args never equal each other, but hand-checking confirms this works")
+        # Move 1: X only (extraction pulls X first)
+        move.start()
+        actual_call_args = self.mock_ump.call.call_args[0][1:]  # skip "um_goto_position_ext"
+        self.assertCTypesArgsEqual(actual_call_args, [
+            self.dev_id, dest[0], np.nan, np.nan, np.nan, speed, speed, speed, speed, mode, self.max_accel,
+        ])
+
+        # Move 2: X + Z
+        move.make_next_call()
+        actual_call_args = self.mock_ump.call.call_args[0][1:]
+        self.assertCTypesArgsEqual(actual_call_args, [
+            self.dev_id, dest[0], np.nan, dest[2], np.nan, speed, speed, speed, speed, mode, self.max_accel,
+        ])
+
+        # Move 3: X + Y + Z
+        move.make_next_call()
+        actual_call_args = self.mock_ump.call.call_args[0][1:]
+        self.assertCTypesArgsEqual(actual_call_args, [
+            self.dev_id, dest[0], dest[1], dest[2], np.nan, speed, speed, speed, speed, mode, self.max_accel,
+        ])
+
     def test_yzx_for_insertion(self):
+        self.mock_ump.get_device.return_value.is_stage = False
         dest = (4., 1., 1.)
         speed = 2
         mode = 0
         move = MoveRequest(self.mock_ump, self.dev_id, dest, speed, simultaneous=False)
+
+        # Move 1: Y only (insertion moves Y first)
         move.start()
-        args = self._ctyped_args(
-            self.dev_id, self.start_pos[0], dest[1], self.start_pos[2], np.NaN, speed, speed, speed, speed, mode, self.max_accel,
-        )
-        # MC: Waa! this test is broken. manual check shows identical args.
-        # self.mock_ump.call.assert_called_with("um_goto_position_ext", *args)
+        actual_call_args = self.mock_ump.call.call_args[0][1:]  # skip "um_goto_position_ext"
+        self.assertCTypesArgsEqual(actual_call_args, [
+            self.dev_id, np.nan, dest[1], np.nan, np.nan, speed, speed, speed, speed, mode, self.max_accel,
+        ])
+
+        # Move 2: Y + Z
         move.make_next_call()
-        args = self._ctyped_args(
-            self.dev_id, self.start_pos[0], dest[1], dest[2], np.NaN, speed, speed, speed, speed, mode, self.max_accel,
-        )
-        # MC: Waa! this test is broken. manual check shows identical args.
-        self.mock_ump.call.assert_called_with("um_goto_position_ext", *args)
+        actual_call_args = self.mock_ump.call.call_args[0][1:]
+        self.assertCTypesArgsEqual(actual_call_args, [
+            self.dev_id, np.nan, dest[1], dest[2], np.nan, speed, speed, speed, speed, mode, self.max_accel,
+        ])
+
+        # Move 3: X + Y + Z
         move.make_next_call()
-        args = self._ctyped_args(
-            self.dev_id, dest[0], dest[1], dest[2], np.NaN, speed, speed, speed, speed, mode, self.max_accel,
-        )
-        # MC: Waa! this test is broken. manual check shows identical args.
-        self.mock_ump.call.assert_called_with("um_goto_position_ext", *args)
+        actual_call_args = self.mock_ump.call.call_args[0][1:]
+        self.assertCTypesArgsEqual(actual_call_args, [
+            self.dev_id, dest[0], dest[1], dest[2], np.nan, speed, speed, speed, speed, mode, self.max_accel,
+        ])

@@ -199,10 +199,10 @@ class MoveRequest(object):
                     self._movement_args(max_acceleration, dest4, speed, simultaneous),
                 )
             elif self.start_pos[0] < dest4[0]:  # manipulator starting behind the dest means insertion
-                just_y = dest4[:]
+                just_y = dest4.copy()
                 just_y[0] = float("nan")
                 just_y[2] = float("nan")
-                just_yz = dest4[:]
+                just_yz = dest4.copy()
                 just_yz[0] = float("nan")
                 self._moves = (
                     self._movement_args(max_acceleration, just_y, speed, simultaneous),
@@ -211,10 +211,10 @@ class MoveRequest(object):
                 )
             else:  # manipulator extraction
                 # TODO handle nan for x, as well as start == dest?
-                just_x = dest4[:]
+                just_x = dest4.copy()
                 just_x[1] = float("nan")
                 just_x[2] = float("nan")
-                just_xz = dest4[:]
+                just_xz = dest4.copy()
                 just_xz[1] = float("nan")
                 self._moves = (
                     self._movement_args(max_acceleration, just_x, speed, simultaneous),
@@ -692,6 +692,39 @@ class UMP(object):
 
         return next_move
 
+    def take_step(self, dev, distance, speed, mode=0, max_acceleration=0):
+        '''Request the specified device to move a relative distance (in um).
+
+        Parameters
+        ----------
+        dev : int
+            ID of device to move
+        distance : array-like of float
+            X,Y,Z,D relative distance to move in um (1-4 values).
+            Negative for backward, zero for axis not to be moved.
+            Missing axes default to 0.0 (no movement).
+        speed : array-like of int
+            X,Y,Z,D movement speeds in um/sec (1-4 values).
+        mode : int
+            Movement mode (0 for automatic selection)
+        max_acceleration : int
+            Maximum acceleration in um/s^2
+        '''
+        dist4 = [float(0.0)] * 4
+        for i, d in enumerate(distance):
+            if i < 4 and d is not None:
+                dist4[i] = float(d)
+
+        speed4 = [int(0)] * 4
+        for i, s in enumerate(speed):
+            if i < 4 and s is not None:
+                speed4[i] = int(s)
+
+        self.call("um_take_step", c_int(dev),
+            c_float(dist4[0]), c_float(dist4[1]), c_float(dist4[2]), c_float(dist4[3]),
+            c_int(speed4[0]), c_int(speed4[1]), c_int(speed4[2]), c_int(speed4[3]),
+            c_int(mode), c_int(max_acceleration))
+
     def is_busy(self, dev):
         """Return True if the specified device is currently moving.
 
@@ -906,6 +939,9 @@ class SensapexDevice(object):
         return self.ump.goto_pos(
             self.dev_id, pos, speed, simultaneous=simultaneous, linear=linear, max_acceleration=max_acceleration, name=name
         )
+
+    def take_step(self, distance, speed, mode=0, max_acceleration=0):
+        return self.ump.take_step(self.dev_id, distance, speed, mode=mode, max_acceleration=max_acceleration)
 
     @property
     def is_stage(self):

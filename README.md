@@ -8,7 +8,7 @@ functions present therein, as well as a device-based abstraction.
 `pip install sensapex`
 
 This library comes packaged
-with [the latest umsdk library](http://dist.sensapex.com/misc/um-sdk/latest/) for windows. All other
+with [the latest umsdk library](https://github.com/sensapex/umsdk/releases) for windows. All other
 versions can be downloaded and/or compiled separately and configured with `UMP.set_library_path`.
 
 ### Usage
@@ -123,6 +123,10 @@ Thanks to the following for contributions:
 * Thomas Braun
 
 ### Changelog
+
+#### 1.504.2
+* Add interface function for um_take_step()
+* Bugfix for non-simultaneous MoveRequest on manipulator
 
 #### 1.504.1
 * Update to latest SDK

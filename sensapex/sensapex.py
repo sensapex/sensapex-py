@@ -703,22 +703,43 @@ class UMP(object):
             X,Y,Z,D relative distance to move in um (1-4 values).
             Negative for backward, zero for axis not to be moved.
             Missing axes default to 0.0 (no movement).
-        speed : array-like of int
-            X,Y,Z,D movement speeds in um/sec (1-4 values).
+        speed : int or array-like of int
+            If a single value: overall speed in um/sec, per-axis speeds
+            are calculated for simultaneous linear movement (all axes finish together).
+            If array-like: explicit X,Y,Z,D movement speeds in um/sec (1-4 values).
         mode : int
             Movement mode (0 for automatic selection)
         max_acceleration : int
             Maximum acceleration in um/s^2
         '''
-        dist4 = [float(0.0)] * 4
+        # Build distance array
+        dist4 = np.array([0.0, 0.0, 0.0, 0.0])
         for i, d in enumerate(distance):
             if i < 4 and d is not None:
                 dist4[i] = float(d)
 
-        speed4 = [int(0)] * 4
-        for i, s in enumerate(speed):
-            if i < 4 and s is not None:
-                speed4[i] = int(s)
+        # Check if speed is a single value
+        try:
+            iter(speed)
+            is_single = False
+        except TypeError:
+            is_single = True
+
+        # Calculate speeds
+        min_speed = 1
+        if is_single:
+            # Single speed value: calculate linear per-axis speeds
+            total_dist = max(1.0, np.linalg.norm(dist4))
+            speed4 = np.clip(speed * np.abs(dist4) / total_dist, min_speed, np.inf)
+            # Axes with zero distance get zero speed (no movement)
+            speed4[dist4 == 0] = 0
+            speed4 = [int(s) for s in speed4]
+        else:
+            # Array of speeds: use explicit per-axis values
+            speed4 = [0, 0, 0, 0]
+            for i, s in enumerate(speed):
+                if i < 4 and s is not None:
+                    speed4[i] = int(s)
 
         self.call("um_take_step", c_int(dev),
             c_float(dist4[0]), c_float(dist4[1]), c_float(dist4[2]), c_float(dist4[3]),

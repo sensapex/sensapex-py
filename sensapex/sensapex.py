@@ -128,7 +128,19 @@ class MoveRequest(object):
 
     max_attempts = 5
 
-    def __init__(self, ump, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, retry_threshold=0.4, name=None):
+    def __init__(
+        self,
+        ump,
+        dev,
+        dest,
+        speed,
+        simultaneous=True,
+        linear=False,
+        max_acceleration=0,
+        retry_threshold=0.5,
+        fail_threshold=1.0,
+        name=None,
+    ):
         self._stack = traceback.StackSummary.extract(traceback.walk_stack(None))
         self._next_move_index = 0
         self.last_pos_exception = None
@@ -141,6 +153,7 @@ class MoveRequest(object):
         self.last_pos = None
         self.attempts = 0
         self.retry_threshold = np.array([retry_threshold] * 4)
+        self.fail_threshold = np.array([fail_threshold] * 4)
         self.speed = speed
         self.start_time = timer()
         self.target_pos = dest
@@ -273,7 +286,7 @@ class MoveRequest(object):
         target = np.array(self.target_pos).astype(float)
         err = np.abs(pos - target)
         mask = np.isfinite(err)
-        return np.all(err[mask] < self.retry_threshold[: len(mask)][mask])
+        return np.all(err[mask] < self.fail_threshold[: len(mask)][mask])
 
     def has_more_calls_to_make(self):
         return self._next_move_index < len(self._moves)
@@ -400,7 +413,8 @@ class UMP(object):
         # duration that manipulator must be not busy before a move is considered complete.
         self.move_expire_time = 50e-3
 
-        self._retry_threshold = 0.4
+        self._retry_threshold = 0.5
+        self._fail_threshold = 1
         self.default_max_accelerations = {}
 
         self.lib = self.get_lib()
@@ -688,8 +702,19 @@ class UMP(object):
         move_request : MoveRequest
             Object that can be used to retrieve the status of this move at a later time.
         """
+        next_move = MoveRequest(
+            self,
+            dev,
+            dest,
+            speed,
+            simultaneous,
+            linear,
+            max_acceleration,
+            self._retry_threshold,
+            self._fail_threshold,
+            name=name,
+        )
         logger = self.get_logger(dev)
-        next_move = MoveRequest(self, dev, dest, speed, simultaneous, linear, max_acceleration, self._retry_threshold, name=name)
         logger.debug(f"Move to {dest!r} speed={speed} simultaneous={simultaneous}, linear={linear}, max_acceleration={max_acceleration}, name={name!r}")
         with self.lock:
             last_move = self._last_move.get(dev, None)
@@ -868,6 +893,17 @@ class UMP(object):
             Maximum allowable error in µm.
         """
         self._retry_threshold = threshold
+
+    def set_fail_threshold(self, threshold):
+        """
+        If we miss any axis by too much (after retrying), consider the move a failure.
+
+        Parameters
+        ----------
+        threshold : float
+            Maximum allowable error in µm.
+        """
+        self._fail_threshold = threshold
 
     def recv_all(self):
         """Receive all queued position/status update packets and update any pending moves."""

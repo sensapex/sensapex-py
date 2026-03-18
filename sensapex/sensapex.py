@@ -1,15 +1,5 @@
 from __future__ import annotations
 
-import atexit
-import contextlib
-import ctypes
-import os
-import platform
-import subprocess
-import sys
-import threading
-import time
-import warnings
 from ctypes import (
     CFUNCTYPE,
     POINTER,
@@ -29,14 +19,25 @@ from ctypes import (
     create_string_buffer,
     pointer,
 )
+
+import atexit
+import contextlib
+import ctypes
+import traceback
+import numpy as np
+import os
+import platform
+import subprocess
+import sys
+import threading
+import time
+import warnings
 from ctypes.util import find_library
 from datetime import datetime
 from pathlib import Path
 from timeit import default_timer
 from traceback import format_stack
 from typing import Dict, List, Union
-
-import numpy as np
 
 if sys.platform == "win32":
     DUMPCAP = r"C:\Program Files\Wireshark\dumpcap.exe"
@@ -122,15 +123,15 @@ class um_state(Structure):
 
 
 class MoveRequest(object):
-    """Class for coordinating and tracking moves.
-    """
+    """Class for coordinating and tracking moves."""
 
     max_attempts = 3
 
-    def __init__(self, ump, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, retry_threshold=0.4):
-
+    def __init__(self, ump, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, retry_threshold=0.4, name=None):
+        self._stack = traceback.StackSummary.extract(traceback.walk_stack(None))
         self._next_move_index = 0
         self._last_pos_exception = None
+        self.name = name
         self.dev = dev
         self.finished = False
         self.finished_event = threading.Event()
@@ -155,9 +156,9 @@ class MoveRequest(object):
 
         # extend dest to 4 values
         def resize_to_4(arr):
-            return np.array(
-                [arr[i] if (i < len(arr) and arr[i] is not None) else np.nan for i in range(4)]
-            ).astype(float)
+            return np.array([arr[i] if (i < len(arr) and arr[i] is not None) else np.nan for i in range(4)]).astype(
+                float
+            )
 
         dest4 = resize_to_4(dest)
 
@@ -190,17 +191,18 @@ class MoveRequest(object):
             if ump.get_device(dev).is_stage:
                 self._moves = (
                     self._movement_args(
-                        max_acceleration, (dest4[0], float("nan"), float("nan"), float("nan")), speed, simultaneous),
+                        max_acceleration, (dest4[0], float("nan"), float("nan"), float("nan")), speed, simultaneous
+                    ),
                     self._movement_args(
-                        max_acceleration, (float("nan"), dest4[1], float("nan"), float("nan")), speed, simultaneous),
-                    self._movement_args(
-                        max_acceleration, dest4, speed, simultaneous),
+                        max_acceleration, (float("nan"), dest4[1], float("nan"), float("nan")), speed, simultaneous
+                    ),
+                    self._movement_args(max_acceleration, dest4, speed, simultaneous),
                 )
             elif self.start_pos[0] < dest4[0]:  # manipulator starting behind the dest means insertion
-                just_y = dest4[:]
+                just_y = dest4.copy()
                 just_y[0] = float("nan")
                 just_y[2] = float("nan")
-                just_yz = dest4[:]
+                just_yz = dest4.copy()
                 just_yz[0] = float("nan")
                 self._moves = (
                     self._movement_args(max_acceleration, just_y, speed, simultaneous),
@@ -209,10 +211,10 @@ class MoveRequest(object):
                 )
             else:  # manipulator extraction
                 # TODO handle nan for x, as well as start == dest?
-                just_x = dest4[:]
+                just_x = dest4.copy()
                 just_x[1] = float("nan")
                 just_x[2] = float("nan")
-                just_xz = dest4[:]
+                just_xz = dest4.copy()
                 just_xz[1] = float("nan")
                 self._moves = (
                     self._movement_args(max_acceleration, just_x, speed, simultaneous),
@@ -300,7 +302,7 @@ def timer():
 
 class UMP(object):
     """Wrapper for the Sensapex uMp API.
-    
+
     All calls except get_ump are thread-safe.
     """
 
@@ -338,20 +340,36 @@ class UMP(object):
     @classmethod
     def load_lib(cls):
         path = os.path.abspath(os.path.dirname(__file__))
-        if cls._lib_path is None:
-            cls._lib_path = find_library("libum")
-        if sys.platform == "win32":
-            if cls._lib_path is not None:
-                return ctypes.windll.LoadLibrary(os.path.join(cls._lib_path, "libum"))
 
+        if sys.platform == "win32":
+            # Try package directory first (where pip install puts um.dll)
+            package_lib = os.path.join(path, "um.dll")
+            if os.path.exists(package_lib):
+                return ctypes.windll.LoadLibrary(package_lib)
+
+            # Fall back to find_library (searches PATH and registry)
+            if cls._lib_path is None:
+                cls._lib_path = find_library("um") or find_library("libum")
+            if cls._lib_path is not None:
+                return ctypes.windll.LoadLibrary(cls._lib_path)
+
+            # Last resort: try loading by name
             with contextlib.suppress(OSError, AttributeError):
                 return ctypes.windll.libum
-            return ctypes.windll.LoadLibrary(os.path.join(path, "libum"))
+            return ctypes.windll.LoadLibrary(os.path.join(path, "um"))
         else:
-            if cls._lib_path is not None:
-                return ctypes.cdll.LoadLibrary(os.path.join(cls._lib_path, "libum.so"))
+            # Try package directory first
+            package_lib = os.path.join(path, "libum.so")
+            if os.path.exists(package_lib):
+                return ctypes.cdll.LoadLibrary(package_lib)
 
-            return ctypes.cdll.LoadLibrary(os.path.join(path, "libum.so"))
+            # Fall back to find_library
+            if cls._lib_path is None:
+                cls._lib_path = find_library("um") or find_library("libum")
+            if cls._lib_path is not None:
+                return ctypes.cdll.LoadLibrary(cls._lib_path)
+
+            return ctypes.cdll.LoadLibrary(package_lib)
 
     @classmethod
     def get_um_state_class(cls):
@@ -360,19 +378,19 @@ class UMP(object):
         return cls._um_state
 
     @classmethod
-    def get_ump(cls, address=None, group=None, start_poller=True) -> UMP:
-        """Return a singleton UM instance.
-        """
+    def get_ump(cls, address=None, group=None, start_poller=True, handle_atexit=True) -> UMP:
+        """Return a singleton UM instance."""
         if address is None:
             address = cls._default_address
         if group is None:
             group = cls._default_group
         # question: can we have multiple UM instances with different address/group ?
         if cls._single is None:
-            cls._single = UMP(address=address, group=group, start_poller=start_poller)
+            cls._single = UMP(address=address, group=group, start_poller=start_poller, handle_atexit=handle_atexit)
         return cls._single
 
-    def __init__(self, address, group, start_poller=True):
+    def __init__(self, address, group, start_poller=True, handle_atexit=True):
+        self._handle_atexit = handle_atexit
         self.broadcast_address = address.decode()
         self.lock = threading.RLock()
         if self._single is not None:
@@ -396,16 +414,20 @@ class UMP(object):
         self._set_debug_mode(self._debug)
 
         min_version = (1, 35)
-        max_version = (1, 400)
+        max_version = (1, 504)
         version_str = self.sdk_version()
         version = tuple(map(int, version_str.lstrip(b"v").split(b".")))
 
         if version < min_version:
             min_version_str = "v{:d}.{:03d}".format(*min_version)
-            raise RuntimeError(f"SDK version {min_version_str} or later required (your version is {version_str} in {self.lib._name})")
+            raise RuntimeError(
+                f"SDK version {min_version_str} or later required (your version is {version_str} in {self.lib._name})"
+            )
         if version > max_version:
             max_version_str = "v{:d}.{:03d}".format(*max_version)
-            raise RuntimeError(f"SDK version {max_version_str} or lower required (your version is {version_str} in {self.lib._name})")
+            raise RuntimeError(
+                f"SDK version {max_version_str} or lower required (your version is {version_str} in {self.lib._name})"
+            )
 
         self.h = None
         self.open(address=address, group=group)
@@ -529,14 +551,12 @@ class UMP(object):
         return self.devices[dev_id]
 
     def sdk_version(self):
-        """Return version of UM SDK.
-        """
+        """Return version of UM SDK."""
         self.lib.um_get_version.restype = c_char_p
         return self.lib.um_get_version()
 
     def list_devices(self, max_id=50):
-        """Return a list of all connected device IDs.
-        """
+        """Return a list of all connected device IDs."""
         devarray = (c_int * max_id)()
         r = self.call("um_get_device_list", byref(devarray), c_int(max_id))
         devs = [devarray[i] for i in range(r)]
@@ -587,7 +607,7 @@ class UMP(object):
 
     def open(self, address, group):
         """Open the UM devices at the given address.
-        
+
         The default address "169.254.255.255" should suffice in most situations.
         """
         if self.h is not None:
@@ -598,11 +618,11 @@ class UMP(object):
         if ptr <= 0:
             raise RuntimeError("Error connecting to UM:", self.lib.um_errorstr(ptr))
         self.h = pointer(self.get_um_state_class().from_address(ptr))
-        atexit.register(self.close)
+        if self._handle_atexit:
+            atexit.register(self.close)
 
     def close(self):
-        """Close the UM device.
-        """
+        """Close the UM device."""
         if self.poller.is_alive():
             self.poller.stop()
             self.poller.join()
@@ -617,7 +637,7 @@ class UMP(object):
 
     def get_pos(self, dev, timeout=0):
         """Return the absolute position of the specified device (in um).
-        
+
         If *timeout* == 0, then the position is returned directly from cache
         and not queried from the device.
         """
@@ -633,7 +653,7 @@ class UMP(object):
         self._write_debug(f"positions: {positions!r}")
         return positions
 
-    def goto_pos(self, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0):
+    def goto_pos(self, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, name=None):
         """Request the specified device to move to an absolute position (in um).
 
         Parameters
@@ -651,23 +671,80 @@ class UMP(object):
             If True, then axis speeds are scaled to produce more linear movement, requires simultaneous
         max_acceleration : int
             Maximum acceleration in um/s^2
+        name : str | None
+            Optional decription of the reason for this move, used in logging and error messages
 
         Returns
         -------
         move_request : MoveRequest
             Object that can be used to retrieve the status of this move at a later time.
         """
-        next_move = MoveRequest(self, dev, dest, speed, simultaneous, linear, max_acceleration, self._retry_threshold)
+        next_move = MoveRequest(self, dev, dest, speed, simultaneous, linear, max_acceleration, self._retry_threshold, name=name)
         with self.lock:
-            last_move = self._last_move.pop(dev, None)
+            last_move = self._last_move.get(dev, None)
             if last_move is not None:
-                last_move.interrupt("started another move before the previous finished")
+                name = '' if name is None else f' ({name})'
+                last_move.interrupt(f"started another move before the previous finished{name}")
 
             self._last_move[dev] = next_move
 
             next_move.start()
 
         return next_move
+
+    def take_step(self, dev, distance, speed, mode=0, max_acceleration=0):
+        '''Request the specified device to move a relative distance (in um).
+
+        Parameters
+        ----------
+        dev : int
+            ID of device to move
+        distance : array-like of float
+            X,Y,Z,D relative distance to move in um (1-4 values).
+            Negative for backward, zero for axis not to be moved.
+            Missing axes default to 0.0 (no movement).
+        speed : int or array-like of int
+            If a single value: overall speed in um/sec, per-axis speeds
+            are calculated for simultaneous linear movement (all axes finish together).
+            If array-like: explicit X,Y,Z,D movement speeds in um/sec (1-4 values).
+        mode : int
+            Movement mode (0 for automatic selection)
+        max_acceleration : int
+            Maximum acceleration in um/s^2
+        '''
+        # Build distance array
+        dist4 = np.array([0.0, 0.0, 0.0, 0.0])
+        for i, d in enumerate(distance):
+            if i < 4 and d is not None:
+                dist4[i] = float(d)
+
+        # Check if speed is a single value
+        try:
+            iter(speed)
+            is_single = False
+        except TypeError:
+            is_single = True
+
+        # Calculate speeds
+        min_speed = 1
+        if is_single:
+            # Single speed value: calculate linear per-axis speeds
+            total_dist = max(1.0, np.linalg.norm(dist4))
+            speed4 = np.clip(speed * np.abs(dist4) / total_dist, min_speed, np.inf)
+            # Axes with zero distance get zero speed (no movement)
+            speed4[dist4 == 0] = 0
+            speed4 = [int(s) for s in speed4]
+        else:
+            # Array of speeds: use explicit per-axis values
+            speed4 = [0, 0, 0, 0]
+            for i, s in enumerate(speed):
+                if i < 4 and s is not None:
+                    speed4[i] = int(s)
+
+        self.call("um_take_step", c_int(dev),
+            c_float(dist4[0]), c_float(dist4[1]), c_float(dist4[2]), c_float(dist4[3]),
+            c_int(speed4[0]), c_int(speed4[1]), c_int(speed4[2]), c_int(speed4[3]),
+            c_int(mode), c_int(max_acceleration))
 
     def is_busy(self, dev):
         """Return True if the specified device is currently moving.
@@ -684,14 +761,14 @@ class UMP(object):
             else:
                 return False
 
-    def stop(self, dev):
-        """Stop the specified manipulator.
-        """
+    def stop(self, dev, reason=None):
+        """Stop the specified manipulator."""
         with self.lock:
             self.call("um_stop", c_int(dev))
             move = self._last_move.pop(dev, None)
             if move is not None:
-                move.interrupt("stop requested before move finished")
+                reason = '' if reason is None else f' ({reason})'
+                move.interrupt(f"stop requested before move finished{reason}")
 
     def set_pressure(self, dev, channel, value):
         return self.call("umc_set_pressure_setting", dev, int(channel), c_float(value))
@@ -781,8 +858,7 @@ class UMP(object):
         self._retry_threshold = threshold
 
     def recv_all(self):
-        """Receive all queued position/status update packets and update any pending moves.
-        """
+        """Receive all queued position/status update packets and update any pending moves."""
         self.call("um_receive", 0)
         self._update_moves()
 
@@ -820,14 +896,13 @@ class UMP(object):
     #         self._write_debug(f"Ping scan could net reach {missing!r}")
 
     def get_firmware_version(self, dev_id):
-        """Return the firmware version installed on a device.
-        """
+        """Return the firmware version installed on a device."""
         version = (c_int * 5)()
         self.call("um_read_version", c_int(dev_id), byref(version), c_int(5))
         return tuple(version)
 
     def ping_device(self, dev_id):
-        """Ping a device. 
+        """Ping a device.
 
         Returns after ping is received, or raises an exception on timeout.
         """
@@ -838,10 +913,10 @@ class SensapexDevice(object):
     """UM wrapper for accessing a single sensapex device.
 
     Example:
-    
+
         dev = SensapexDevice(1)  # get handle to manipulator 1
         pos = dev.get_pos()
-        pos[0] += 10000  # add 10 um to x axis 
+        pos[0] += 10000  # add 10 um to x axis
         dev.goto_pos(pos, speed=10)
     """
 
@@ -881,10 +956,13 @@ class SensapexDevice(object):
     def get_pos(self, timeout=None):
         return self.ump.get_pos(self.dev_id, timeout=timeout)
 
-    def goto_pos(self, pos, speed, simultaneous=True, linear=False, max_acceleration=0):
+    def goto_pos(self, pos, speed, simultaneous=True, linear=False, max_acceleration=0, name=None):
         return self.ump.goto_pos(
-            self.dev_id, pos, speed, simultaneous=simultaneous, linear=linear, max_acceleration=max_acceleration
+            self.dev_id, pos, speed, simultaneous=simultaneous, linear=linear, max_acceleration=max_acceleration, name=name
         )
+
+    def take_step(self, distance, speed, mode=0, max_acceleration=0):
+        return self.ump.take_step(self.dev_id, distance, speed, mode=mode, max_acceleration=max_acceleration)
 
     @property
     def is_stage(self):
@@ -895,8 +973,8 @@ class SensapexDevice(object):
     def is_busy(self):
         return self.ump.is_busy(self.dev_id)
 
-    def stop(self):
-        return self.ump.stop(self.dev_id)
+    def stop(self, reason=None):
+        return self.ump.stop(self.dev_id, reason=reason)
 
     def _change_callback(self, dev_id, new_pos, old_pos):
         for cb in self.callbacks:

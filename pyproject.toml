@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel", "numpy"]
+build-backend = "_build_backend"
+backend-path = ["."]
+
+[project]
+name = "sensapex"
+dynamic = ["version"]
+description = "Python wrapper for the Sensapex SDK"
+readme = {file = "README.md", content-type = "text/markdown"}
+requires-python = ">=3.7"
+license = "MIT"
+authors = [
+  {name = "Luke Campagnola", email = "luke.campagnola@gmail.com"},
+]
+dependencies = [
+  "numpy",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Other Environment",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/sensapex/sensapex-py"
+
+[tool.setuptools.packages.find]
+include = ["sensapex", "sensapex.*", "tests", "tests.*"]
+
+[tool.setuptools.package-data]
+sensapex = ["*.dll", "*.so", "*.dylib", "*.exe"]
+
+[tool.setuptools.dynamic]
+version = {attr = "sensapex.__version__"}

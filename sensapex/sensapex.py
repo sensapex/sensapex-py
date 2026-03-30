@@ -891,10 +891,13 @@ class UMP(object):
                         if not move.is_close_enough():
                             pos = move._read_position()
                             logger.debug(f'move finished but final position {pos!r} differs from target {move.target_pos!r} by more than {move.retry_threshold!r}')
+                            diff = np.abs(pos - move.target_pos)
+                            axes_different = np.where(diff > move.retry_threshold)[0]
+                            axis_msg = ", ".join([f"axis {i}: {diff[i]}" for i in axes_different])
                             move.interrupt(
                                 f"move finished but did not reach target position "
-                                f"(final position {pos!r} differs from target {move.target_pos!r} by more than "
-                                f"{move.retry_threshold!r}; attempted {move.attempts} times)")
+                                f"(final position {pos!r} differs from target {move.target_pos!r} "
+                                f"by more than {move.retry_threshold!r} on {axis_msg})")
                         else:
                             logger.debug(f'move completed successfully')
                             move.finish()

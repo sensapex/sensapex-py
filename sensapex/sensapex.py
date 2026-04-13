@@ -281,12 +281,19 @@ class MoveRequest(object):
     def _read_position(self):
         return np.array(self.ump.get_pos(self.dev, timeout=-1))
 
-    def is_close_enough(self):
+    def reached_target(self):
         pos = self._read_position()
         target = np.array(self.target_pos).astype(float)
         err = np.abs(pos - target)
         mask = np.isfinite(err)
         return np.all(err[mask] < self.fail_threshold[: len(mask)][mask])
+
+    def should_retry(self):
+        pos = self._read_position()
+        target = np.array(self.target_pos).astype(float)
+        err = np.abs(pos - target)
+        mask = np.isfinite(err)
+         return np.any(err[mask] > self.retry_threshold[: len(mask)][mask])
 
     def has_more_calls_to_make(self):
         return self._next_move_index < len(self._moves)
@@ -919,21 +926,26 @@ class UMP(object):
                         continue
                     if move.has_more_calls_to_make():
                         move.make_next_call()
-                    elif move.can_retry() and not move.is_close_enough():
+                    elif move.can_retry() and move.should_retry():
                         logger.debug(f'retry last move (attempt {move.attempts + 1}/{move.max_attempts})')
                         move.start()
                     else:
                         self._last_move.pop(dev)
-                        if not move.is_close_enough():
+                        if not move.reached_target():
                             pos = move._read_position()
-                            logger.debug(f'move finished but final position {pos!r} differs from target {move.target_pos!r} by more than {move.retry_threshold!r}')
+                            logger.debug(
+                                f'move finished but final position {pos!r} differs from target '
+                                f'{move.target_pos!r} by more than {move.fail_threshold!r}'
+                            )
                             diff = np.abs(pos - move.target_pos)
-                            axes_different = np.where(diff > move.retry_threshold)[0]
+                            axes_different = np.where(diff > move.fail_threshold)[0]
                             axis_msg = ", ".join([f"axis {i}: {diff[i]}" for i in axes_different])
                             move.interrupt(
                                 f"move finished but did not reach target position "
                                 f"(final position {pos!r} differs from target {move.target_pos!r} "
-                                f"by more than {move.retry_threshold!r} on {axis_msg})")
+                                f"by more than {move.fail_threshold!r} on {axis_msg}; "
+                                f"attempted {move.attempts} times)"
+                            )
                         else:
                             logger.debug(f'move completed successfully')
                             move.finish()

@@ -413,8 +413,8 @@ class UMP(object):
         # duration that manipulator must be not busy before a move is considered complete.
         self.move_expire_time = 50e-3
 
-        self._retry_threshold = 0.5
-        self._fail_threshold = 1
+        self._retry_threshold = 0.1
+        self._fail_threshold = 0.999
         self.default_max_accelerations = {}
 
         self.lib = self.get_lib()

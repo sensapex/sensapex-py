@@ -293,7 +293,7 @@ class MoveRequest(object):
         target = np.array(self.target_pos).astype(float)
         err = np.abs(pos - target)
         mask = np.isfinite(err)
-         return np.any(err[mask] > self.retry_threshold[: len(mask)][mask])
+        return np.any(err[mask] > self.retry_threshold[: len(mask)][mask])
 
     def has_more_calls_to_make(self):
         return self._next_move_index < len(self._moves)

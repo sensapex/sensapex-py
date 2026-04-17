@@ -128,7 +128,19 @@ class MoveRequest(object):
 
     max_attempts = 5
 
-    def __init__(self, ump, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, retry_threshold=0.4, name=None):
+    def __init__(
+        self,
+        ump,
+        dev,
+        dest,
+        speed,
+        simultaneous=True,
+        linear=False,
+        max_acceleration=0,
+        retry_threshold=0.5,
+        fail_threshold=1.0,
+        name=None,
+    ):
         self._stack = traceback.StackSummary.extract(traceback.walk_stack(None))
         self._next_move_index = 0
         self.last_pos_exception = None
@@ -141,6 +153,7 @@ class MoveRequest(object):
         self.last_pos = None
         self.attempts = 0
         self.retry_threshold = np.array([retry_threshold] * 4)
+        self.fail_threshold = np.array([fail_threshold] * 4)
         self.speed = speed
         self.start_time = timer()
         self.target_pos = dest
@@ -268,12 +281,19 @@ class MoveRequest(object):
     def _read_position(self):
         return np.array(self.ump.get_pos(self.dev, timeout=-1))
 
-    def is_close_enough(self):
+    def reached_target(self):
         pos = self._read_position()
         target = np.array(self.target_pos).astype(float)
         err = np.abs(pos - target)
         mask = np.isfinite(err)
-        return np.all(err[mask] < self.retry_threshold[: len(mask)][mask])
+        return np.all(err[mask] < self.fail_threshold[: len(mask)][mask])
+
+    def should_retry(self):
+        pos = self._read_position()
+        target = np.array(self.target_pos).astype(float)
+        err = np.abs(pos - target)
+        mask = np.isfinite(err)
+        return np.any(err[mask] > self.retry_threshold[: len(mask)][mask])
 
     def has_more_calls_to_make(self):
         return self._next_move_index < len(self._moves)
@@ -400,7 +420,8 @@ class UMP(object):
         # duration that manipulator must be not busy before a move is considered complete.
         self.move_expire_time = 50e-3
 
-        self._retry_threshold = 0.4
+        self._retry_threshold = 0.1
+        self._fail_threshold = 0.999
         self.default_max_accelerations = {}
 
         self.lib = self.get_lib()
@@ -688,8 +709,19 @@ class UMP(object):
         move_request : MoveRequest
             Object that can be used to retrieve the status of this move at a later time.
         """
+        next_move = MoveRequest(
+            self,
+            dev,
+            dest,
+            speed,
+            simultaneous,
+            linear,
+            max_acceleration,
+            self._retry_threshold,
+            self._fail_threshold,
+            name=name,
+        )
         logger = self.get_logger(dev)
-        next_move = MoveRequest(self, dev, dest, speed, simultaneous, linear, max_acceleration, self._retry_threshold, name=name)
         logger.debug(f"Move to {dest!r} speed={speed} simultaneous={simultaneous}, linear={linear}, max_acceleration={max_acceleration}, name={name!r}")
         with self.lock:
             last_move = self._last_move.get(dev, None)
@@ -869,6 +901,17 @@ class UMP(object):
         """
         self._retry_threshold = threshold
 
+    def set_fail_threshold(self, threshold):
+        """
+        If we miss any axis by too much (after retrying), consider the move a failure.
+
+        Parameters
+        ----------
+        threshold : float
+            Maximum allowable error in µm.
+        """
+        self._fail_threshold = threshold
+
     def recv_all(self):
         """Receive all queued position/status update packets and update any pending moves."""
         self.call("um_receive", 0)
@@ -883,21 +926,26 @@ class UMP(object):
                         continue
                     if move.has_more_calls_to_make():
                         move.make_next_call()
-                    elif move.can_retry() and not move.is_close_enough():
+                    elif move.can_retry() and move.should_retry():
                         logger.debug(f'retry last move (attempt {move.attempts + 1}/{move.max_attempts})')
                         move.start()
                     else:
                         self._last_move.pop(dev)
-                        if not move.is_close_enough():
+                        if not move.reached_target():
                             pos = move._read_position()
-                            logger.debug(f'move finished but final position {pos!r} differs from target {move.target_pos!r} by more than {move.retry_threshold!r}')
+                            logger.debug(
+                                f'move finished but final position {pos!r} differs from target '
+                                f'{move.target_pos!r} by more than {move.fail_threshold!r}'
+                            )
                             diff = np.abs(pos - move.target_pos)
-                            axes_different = np.where(diff > move.retry_threshold)[0]
+                            axes_different = np.where(diff > move.fail_threshold)[0]
                             axis_msg = ", ".join([f"axis {i}: {diff[i]}" for i in axes_different])
                             move.interrupt(
                                 f"move finished but did not reach target position "
                                 f"(final position {pos!r} differs from target {move.target_pos!r} "
-                                f"by more than {move.retry_threshold!r} on {axis_msg})")
+                                f"by more than {move.fail_threshold!r} on {axis_msg}; "
+                                f"attempted {move.attempts} times)"
+                            )
                         else:
                             logger.debug(f'move completed successfully')
                             move.finish()

@@ -286,7 +286,7 @@ class MoveRequest(object):
         target = np.array(self.target_pos).astype(float)
         err = np.abs(pos - target)
         mask = np.isfinite(err)
-        return np.all(err[mask] < self.fail_threshold[: len(mask)][mask])
+        return np.all(err[mask] <= self.fail_threshold[: len(mask)][mask])
 
     def should_retry(self):
         pos = self._read_position()

@@ -126,8 +126,6 @@ class um_state(Structure):
 class MoveRequest(object):
     """Class for coordinating and tracking moves."""
 
-    max_attempts = 5
-
     def __init__(
         self,
         ump,
@@ -140,6 +138,7 @@ class MoveRequest(object):
         retry_threshold=0.5,
         fail_threshold=1.0,
         name=None,
+        max_attempts=5,
     ):
         self._stack = traceback.StackSummary.extract(traceback.walk_stack(None))
         self._next_move_index = 0
@@ -152,6 +151,7 @@ class MoveRequest(object):
         self.interrupted = False
         self.last_pos = None
         self.attempts = 0
+        self.max_attempts = max_attempts
         self.retry_threshold = np.array([retry_threshold] * 4)
         self.fail_threshold = np.array([fail_threshold] * 4)
         self.speed = speed
@@ -683,7 +683,7 @@ class UMP(object):
         self._write_debug(f"positions: {positions!r}")
         return positions
 
-    def goto_pos(self, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, name=None):
+    def goto_pos(self, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, name=None, max_attempts=None):
         """Request the specified device to move to an absolute position (in um).
 
         Parameters
@@ -703,6 +703,8 @@ class UMP(object):
             Maximum acceleration in um/s^2
         name : str | None
             Optional decription of the reason for this move, used in logging and error messages
+        max_attempts : int | None
+            Maximum number of move attempts before raising an error. Defaults to 5.
 
         Returns
         -------
@@ -720,6 +722,7 @@ class UMP(object):
             self._retry_threshold,
             self._fail_threshold,
             name=name,
+            max_attempts=max_attempts,
         )
         logger = self.get_logger(dev)
         logger.debug(f"Move to {dest!r} speed={speed} simultaneous={simultaneous}, linear={linear}, max_acceleration={max_acceleration}, name={name!r}")
@@ -1028,9 +1031,9 @@ class SensapexDevice(object):
     def get_pos(self, timeout=None):
         return self.ump.get_pos(self.dev_id, timeout=timeout)
 
-    def goto_pos(self, pos, speed, simultaneous=True, linear=False, max_acceleration=0, name=None):
+    def goto_pos(self, pos, speed, simultaneous=True, linear=False, max_acceleration=0, name=None, max_attempts=None):
         return self.ump.goto_pos(
-            self.dev_id, pos, speed, simultaneous=simultaneous, linear=linear, max_acceleration=max_acceleration, name=name
+            self.dev_id, pos, speed, simultaneous=simultaneous, linear=linear, max_acceleration=max_acceleration, name=name, max_attempts=max_attempts
         )
 
     def take_step(self, distance, speed, mode=0, max_acceleration=0):

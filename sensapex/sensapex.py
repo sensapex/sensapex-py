@@ -293,7 +293,7 @@ class MoveRequest(object):
         target = np.array(self.target_pos).astype(float)
         err = np.abs(pos - target)
         mask = np.isfinite(err)
-         return np.any(err[mask] > self.retry_threshold[: len(mask)][mask])
+        return np.any(err[mask] > self.retry_threshold[: len(mask)][mask])
 
     def has_more_calls_to_make(self):
         return self._next_move_index < len(self._moves)
@@ -941,12 +941,14 @@ class UMP(object):
                                 f'{move.target_pos!r} by more than {move.fail_threshold!r}'
                             )
                             diff = np.abs(pos - move.target_pos)
-                            axes_different = np.where(diff > move.retry_threshold)[0]
+                            axes_different = np.where(diff > move.fail_threshold)[0]
                             axis_msg = ", ".join([f"axis {i}: {diff[i]}" for i in axes_different])
                             move.interrupt(
                                 f"move finished but did not reach target position "
                                 f"(final position {pos!r} differs from target {move.target_pos!r} "
-                                f"by more than {move.fail_threshold!r} on {axis_msg})")
+                                f"by more than {move.fail_threshold!r} on {axis_msg}; "
+                                f"attempted {move.attempts} times)"
+                            )
                         else:
                             logger.debug(f'move completed successfully')
                             move.finish()

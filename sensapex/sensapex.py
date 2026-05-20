@@ -23,6 +23,7 @@ from ctypes import (
 import atexit
 import contextlib
 import ctypes
+import logging
 import traceback
 import numpy as np
 import os
@@ -125,12 +126,12 @@ class um_state(Structure):
 class MoveRequest(object):
     """Class for coordinating and tracking moves."""
 
-    max_attempts = 3
+    max_attempts = 5
 
     def __init__(self, ump, dev, dest, speed, simultaneous=True, linear=False, max_acceleration=0, retry_threshold=0.4, name=None):
         self._stack = traceback.StackSummary.extract(traceback.walk_stack(None))
         self._next_move_index = 0
-        self._last_pos_exception = None
+        self.last_pos_exception = None
         self.name = name
         self.dev = dev
         self.finished = False
@@ -139,7 +140,7 @@ class MoveRequest(object):
         self.interrupted = False
         self.last_pos = None
         self.attempts = 0
-        self._retry_threshold = np.array([retry_threshold] * 4)
+        self.retry_threshold = np.array([retry_threshold] * 4)
         self.speed = speed
         self.start_time = timer()
         self.target_pos = dest
@@ -164,7 +165,7 @@ class MoveRequest(object):
 
         # disable axes that are already close enough to their target
         diff = dest4 - resize_to_4(self.start_pos)
-        no_move_mask = np.abs(diff) < self._retry_threshold
+        no_move_mask = np.abs(diff) < self.retry_threshold
         dest4[no_move_mask] = np.nan
 
         # assign speeds to each axis
@@ -235,14 +236,13 @@ class MoveRequest(object):
         self.ump.call("um_stop", c_int(self.dev))
         self.interrupt_reason = reason
         self.interrupted = True
-        self.finished = True
-        self.finished_event.set()
+        self.finish()
 
     def finish(self):
         try:
             self.last_pos = self._read_position()
         except Exception as e:
-            self._last_pos_exception = e
+            self.last_pos_exception = e
         finally:
             self.finished = True
             self.finished_event.set()
@@ -273,7 +273,7 @@ class MoveRequest(object):
         target = np.array(self.target_pos).astype(float)
         err = np.abs(pos - target)
         mask = np.isfinite(err)
-        return np.all(err[mask] < self._retry_threshold[: len(mask)][mask])
+        return np.all(err[mask] < self.retry_threshold[: len(mask)][mask])
 
     def has_more_calls_to_make(self):
         return self._next_move_index < len(self._moves)
@@ -441,6 +441,7 @@ class UMP(object):
         self._axis_counts = {}
 
         self.devices = {}
+        self.loggers = {}
 
         self.poller = PollThread(self)
         if start_poller:
@@ -454,6 +455,12 @@ class UMP(object):
         cls._debug_at_cls = enabled
         if cls._single is not None:
             cls._single._set_debug_mode(enabled)
+
+    def get_logger(self, device_id: int):
+        """Return a logger for the specified device ID, which can be used to retrieve debug messages related to that device."""
+        if device_id not in self.loggers:
+            self.loggers[device_id] = logging.getLogger(f"sensapex.device{device_id}")
+        return self.loggers[device_id]
 
     def _set_debug_mode(self, enabled: bool) -> None:
         with self.lock:
@@ -484,6 +491,8 @@ class UMP(object):
                 raise RuntimeError(f"dumpcap executable '{DUMPCAP}' failed with return {returncode}")
         except PermissionError as e:
             raise RuntimeError(f"user does not have permission to use dumpcap executable '{DUMPCAP}'") from e
+        except FileNotFoundError as e:
+            raise RuntimeError(f"dumpcap executable '{DUMPCAP}' not found; is Wireshark installed?") from e
 
     def _write_debug(self, message: str, error: Union[Exception, None] = None):
         if self._debug:
@@ -679,7 +688,9 @@ class UMP(object):
         move_request : MoveRequest
             Object that can be used to retrieve the status of this move at a later time.
         """
+        logger = self.get_logger(dev)
         next_move = MoveRequest(self, dev, dest, speed, simultaneous, linear, max_acceleration, self._retry_threshold, name=name)
+        logger.debug(f"Move to {dest!r} speed={speed} simultaneous={simultaneous}, linear={linear}, max_acceleration={max_acceleration}, name={name!r}")
         with self.lock:
             last_move = self._last_move.get(dev, None)
             if last_move is not None:
@@ -765,6 +776,7 @@ class UMP(object):
         """Stop the specified manipulator."""
         with self.lock:
             self.call("um_stop", c_int(dev))
+            self.get_logger(dev).debug(f"stop device {dev} ({reason!r})")
             move = self._last_move.pop(dev, None)
             if move is not None:
                 reason = '' if reason is None else f' ({reason})'
@@ -865,18 +877,32 @@ class UMP(object):
     def _update_moves(self):
         with self.lock:
             for dev, move in list(self._last_move.items()):
+                logger = self.get_logger(dev)
                 try:
                     if move.is_in_progress():
                         continue
                     if move.has_more_calls_to_make():
                         move.make_next_call()
                     elif move.can_retry() and not move.is_close_enough():
+                        logger.debug(f'retry last move (attempt {move.attempts + 1}/{move.max_attempts})')
                         move.start()
                     else:
                         self._last_move.pop(dev)
-                        move.finish()
+                        if not move.is_close_enough():
+                            pos = move._read_position()
+                            logger.debug(f'move finished but final position {pos!r} differs from target {move.target_pos!r} by more than {move.retry_threshold!r}')
+                            diff = np.abs(pos - move.target_pos)
+                            axes_different = np.where(diff > move.retry_threshold)[0]
+                            axis_msg = ", ".join([f"axis {i}: {diff[i]}" for i in axes_different])
+                            move.interrupt(
+                                f"move finished but did not reach target position "
+                                f"(final position {pos!r} differs from target {move.target_pos!r} "
+                                f"by more than {move.retry_threshold!r} on {axis_msg})")
+                        else:
+                            logger.debug(f'move completed successfully')
+                            move.finish()
                 except Exception:
-                    print(f"Error processing move on sensapex device {dev}")
+                    logger.exception(f"Error processing move on sensapex device {dev}")
                     sys.excepthook(*sys.exc_info())
 
     def track_device_ids(self, *dev_ids):

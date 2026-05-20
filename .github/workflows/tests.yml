@@ -1,12 +1,12 @@
-# Runs unit tests on push and pull requests to main.
+# Runs unit tests on push and pull requests to core.
 # Tests use unittest and do not require hardware.
 name: Tests
 
 on:
   push:
-    branches: [main]
+    branches: [core]
   pull_request:
-    branches: [main]
+    branches: [core]
 
 jobs:
   test:

@@ -774,9 +774,10 @@ class UMP(object):
 
     def stop(self, dev, reason=None):
         """Stop the specified manipulator."""
+        logger = self.get_logger(dev)
         with self.lock:
             self.call("um_stop", c_int(dev))
-            self.get_logger(dev).debug(f"stop device {dev} ({reason!r})")
+            logger.debug(f"stop device {dev} ({reason!r})")
             move = self._last_move.pop(dev, None)
             if move is not None:
                 reason = '' if reason is None else f' ({reason})'

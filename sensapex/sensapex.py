@@ -135,8 +135,8 @@ class MoveRequest(object):
         simultaneous=True,
         linear=False,
         max_acceleration=0,
-        retry_threshold=0.5,
-        fail_threshold=1.0,
+        retry_threshold=0.1,
+        fail_threshold=0.999,
         name=None,
         max_attempts=5,
     ):

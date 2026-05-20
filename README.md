@@ -127,6 +127,12 @@ Thanks to the following for contributions:
 
 ### Changelog
 
+#### 1.504.3
+* `fail_threshold` option distinct from `retry_threshold` for managing move retries and failures
+* 4-axis support in accuracy test
+* Add CI via GitHub Actions with badges in README
+* Bugfixes for move tracking
+
 #### 1.504.2
 * Add interface function for um_take_step()
 * Bugfix for non-simultaneous MoveRequest on manipulator

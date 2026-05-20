@@ -1,0 +1,2 @@
+-P ubuntu-latest=sensapex-act-runner
+--pull=false

@@ -1,5 +1,8 @@
 # Sensapex SDK
 
+[![Tests](https://github.com/sensapex/sensapex-py/actions/workflows/tests.yml/badge.svg)](https://github.com/sensapex/sensapex-py/actions/workflows/tests.yml)
+[![PyPI version](https://img.shields.io/pypi/v/sensapex.svg)](https://pypi.org/project/sensapex/)
+
 This python library wraps the C SDK provided by Sensapex's umsdk. It provides general access to the
 functions present therein, as well as a device-based abstraction.
 

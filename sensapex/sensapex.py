@@ -160,6 +160,12 @@ def _fmt_position_block(labeled_rows):
 class MoveRequest(object):
     """Class for coordinating and tracking moves."""
 
+    #: An axis at least this far (µm) from its target at the start of an attempt, that
+    #: closes less than half of that gap, is stalled; see :meth:`_stall_step`.
+    stall_distance = 5.0
+    #: Length (µm) of the relative step that frees a stalled axis; uMp overshoots it by ~0.5 µm.
+    stall_step = 1.0
+
     def __init__(
         self,
         ump,
@@ -187,6 +193,8 @@ class MoveRequest(object):
         self.interrupted = False
         self.last_pos = None
         self.attempts = 0
+        self.stall_steps = 0
+        self._attempt_start_pos = None
         self.max_attempts = 5 if max_attempts is None else max_attempts
         self.retry_threshold = np.array([retry_threshold] * 4)
         self.fail_threshold = np.array([fail_threshold] * 4)
@@ -292,7 +300,8 @@ class MoveRequest(object):
             f"           mode: simultaneous={self.simultaneous}, linear={self.linear}, "
             f"max_acceleration={self.max_acceleration}",
             f"     thresholds: retry={float(self.retry_threshold[0]):g} um, "
-            f"fail={float(self.fail_threshold[0]):g} um, max_attempts={self.max_attempts}",
+            f"fail={float(self.fail_threshold[0]):g} um, max_attempts={self.max_attempts}, "
+            f"stall_steps={self.stall_steps}",
             f"         timing: {timer() - self.start_time:.2f} s elapsed, "
             f"{self.estimated_duration:.2f} s estimated",
             f"        request: name={self.name!r}, device={self.dev}",
@@ -323,9 +332,22 @@ class MoveRequest(object):
             self.finished_event.set()
 
     def start(self):
+        """Send the first call of the next attempt, preceded by a stall step if one is needed."""
+        pos = self.start_pos if self.attempts == 0 else self._read_position()
+        step = self._stall_step(pos)
+        self._attempt_start_pos = pos
         self.attempts += 1
         self._next_move_index = 0
         try:
+            if step is not None:
+                self.stall_steps += 1
+                self.ump.get_logger(self.dev).warning(
+                    f"axes stalled on attempt {self.attempts - 1}; stepping {_fmt_row(step)} um before retrying"
+                )
+                stalled = step != 0
+                self.ump.take_step(
+                    self.dev, step, np.where(stalled, self.axis_speeds, 0), max_acceleration=int(self.max_acceleration)
+                )
             self.make_next_call()
         except UMError as err:
             if err.errno == -4:
@@ -333,6 +355,27 @@ class MoveRequest(object):
                 self.interrupted = True
                 self.interrupt_reason = str(err)
                 self.finish()
+
+    def _stall_step(self, pos):
+        """Return the 4-axis relative step (µm) that frees axes stalled on the last attempt, or None.
+
+        A stalled axis gets :attr:`stall_step` toward its commanded target (less if closer);
+        other axes get 0. uMp firmware can leave an axis unresponsive to gotos in one
+        direction until it is moved by a relative step.
+        """
+        if self._attempt_start_pos is None:
+            return None
+        n = len(pos)
+        target = self.commanded_dest[:n]
+        before = np.abs(target - self._attempt_start_pos)
+        after = target - pos
+        with np.errstate(invalid="ignore"):
+            stalled = (before >= self.stall_distance) & (before - np.abs(after) < before / 2)
+        if not np.any(stalled):
+            return None
+        step = np.zeros(4)
+        step[:n][stalled] = np.sign(after[stalled]) * np.minimum(self.stall_step, np.abs(after[stalled]))
+        return step
 
     def is_in_progress(self):
         return self.ump.is_busy(self.dev)

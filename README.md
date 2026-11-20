@@ -1,5 +1,8 @@
 # Sensapex SDK
 
+[![Tests](https://github.com/sensapex/sensapex-py/actions/workflows/tests.yml/badge.svg)](https://github.com/sensapex/sensapex-py/actions/workflows/tests.yml)
+[![PyPI version](https://img.shields.io/pypi/v/sensapex.svg)](https://pypi.org/project/sensapex/)
+
 This python library wraps the C SDK provided by Sensapex's umsdk. It provides general access to the
 functions present therein, as well as a device-based abstraction.
 
@@ -123,6 +126,12 @@ Thanks to the following for contributions:
 * Thomas Braun
 
 ### Changelog
+
+#### 1.504.3
+* `fail_threshold` option distinct from `retry_threshold` for managing move retries and failures
+* 4-axis support in accuracy test
+* Add CI via GitHub Actions with badges in README
+* Bugfixes for move tracking
 
 #### 1.504.2
 * Add interface function for um_take_step()

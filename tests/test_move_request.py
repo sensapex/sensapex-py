@@ -132,3 +132,49 @@ class TestMoveRequest(TestCase):
         self.assertCTypesArgsEqual(actual_call_args, [
             self.dev_id, dest[0], dest[1], dest[2], np.nan, speed, speed, speed, speed, mode, self.max_accel,
         ])
+
+
+class TestStallStep(TestCase):
+    def setUp(self):
+        self.dev_id = 1
+        self.ump = Mock()
+        self.ump.default_max_accelerations = {self.dev_id: 0}
+        self.ump.get_pos = Mock(return_value=(0., 0., 0.))
+
+    def _retry_after(self, dest, moved_to):
+        """Start a move to *dest*, end its first attempt at *moved_to*, then start the retry."""
+        move = MoveRequest(self.ump, self.dev_id, dest, 470, simultaneous=True, linear=True, max_attempts=3)
+        move.start()
+        self.ump.get_pos.return_value = moved_to
+        move.start()
+        return move
+
+    def _step_calls(self):
+        return [c for c in self.ump.mock_calls if c[0] == "take_step"]
+
+    def test_first_attempt_never_steps(self):
+        move = MoveRequest(self.ump, self.dev_id, (0., 0., -700.), 470, simultaneous=True, linear=True)
+        move.start()
+        self.assertEqual(self._step_calls(), [])
+
+    def test_stalled_axis_steps_toward_target_before_the_retry(self):
+        move = self._retry_after((0., 0., -700.), (0., 0., 0.))
+        names = [c[0] for c in self.ump.mock_calls if c[0] in ("take_step", "call")]
+        self.assertEqual(names, ["call", "take_step", "call"])
+        dev, distance, speed = self._step_calls()[0][1]
+        self.assertEqual(dev, self.dev_id)
+        np.testing.assert_array_equal(distance, [0, 0, -1, 0])
+        np.testing.assert_array_equal(speed, [0, 0, 470, 0])
+        self.assertEqual(move.stall_steps, 1)
+
+    def test_axis_that_closed_most_of_the_gap_does_not_step(self):
+        self._retry_after((0., 0., -700.), (0., 0., -600.))
+        self.assertEqual(self._step_calls(), [])
+
+    def test_short_miss_does_not_step(self):
+        self._retry_after((0., 0., -3.), (0., 0., 0.))
+        self.assertEqual(self._step_calls(), [])
+
+    def test_only_the_stalled_axis_steps(self):
+        self._retry_after((500., 0., 700.), (500., 0., 0.))
+        np.testing.assert_array_equal(self._step_calls()[0][1][1], [0, 0, 1, 0])

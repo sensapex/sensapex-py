@@ -11,6 +11,10 @@ from sensapex.sensapex import LIBUM_DEF_BCAST_ADDRESS
 from sensapex.utils import bytes_str
 
 
+# Travel range (µm) of each manipulator axis; uMp devices have 20 mm of travel per axis
+AXIS_LIMITS = (0.0, 20000.0)
+
+
 parser = argparse.ArgumentParser(
     description="Test for sensapex devices; perform a series of random moves while rapidly polling the device position"
                 " and state."
@@ -64,6 +68,14 @@ parser.add_argument(
     default=None,
     dest="start_pos",
     help="x,y,z starting position (by default, the current position is used)",
+)
+parser.add_argument(
+    "--ignore-limits",
+    action="store_true",
+    default=False,
+    dest="ignore_limits",
+    help=f"Run the test even if some planned moves fall outside the manipulator's travel range "
+         f"({AXIS_LIMITS[0]:g} to {AXIS_LIMITS[1]:g} µm per axis)",
 )
 parser.add_argument(
     "--test-pos",
@@ -159,6 +171,33 @@ else:
     targets[::2] = start_pos[None, :]
     targets[1::2] = test_pos[None, :]
     print(f"Testing moves between {start_pos} and {test_pos}:\n{targets}")
+
+# Verify that every planned move stays within the manipulator's travel range. The test ends by
+# returning to the starting position, so that is checked along with the targets.
+planned = [(f"move {i + 1}/{args.iter}", t) for i, t in enumerate(targets)]
+planned.append(("return to start", start_pos))
+violations = []
+for label, position in planned:
+    for i, ax in enumerate(axes):
+        val = position[i]
+        if not np.isfinite(val):
+            continue  # NaN means "leave this axis where it is"
+        if not AXIS_LIMITS[0] <= val <= AXIS_LIMITS[1]:
+            violations.append((label, ax, val))
+
+if violations:
+    what = "position" if len(violations) == 1 else "positions"
+    print(
+        f"\nError: {len(violations)} planned {what} outside the manipulator's travel range "
+        f"[{AXIS_LIMITS[0]:g}, {AXIS_LIMITS[1]:g}] µm:"
+    )
+    for label, ax, val in violations:
+        print(f"  {label}: {ax} = {val:0.2f} µm")
+    if args.ignore_limits:
+        print("Continuing anyway (--ignore-limits)")
+    else:
+        print("Adjust --start-pos, --test-pos or --distance, or pass --ignore-limits to run anyway.")
+        sys.exit(1)
 
 speeds = [args.speed] * args.iter
 print(f"Using speed {args.speed} um/s for all moves")

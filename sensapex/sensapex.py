@@ -627,7 +627,7 @@ class UMP(object):
                 if retries and retries > 0:
                     self._write_debug(err_msg)
                     warnings.warn(err_msg)
-                    return self.call(fn, *args, retries - 1)
+                    return self.call(fn, *args, retries=retries - 1)
                 else:
                     raise exc
             return rval
